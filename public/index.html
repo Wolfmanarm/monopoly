@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monopoly Multiplayer</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+    <!-- Game Lobby -->
+    <div id="lobby" class="screen">
+        <div class="lobby-container">
+            <h1>🎲 Monopoly Multiplayer</h1>
+            <div class="lobby-form">
+                <input type="text" id="playerName" placeholder="Enter your name" maxlength="20">
+                <button id="joinBtn">Join Game</button>
+            </div>
+            <div id="lobbyStatus" class="status-message"></div>
+            <div id="playerList" class="player-list"></div>
+            <button id="startBtn" class="start-btn" style="display: none;">Start Game</button>
+        </div>
+    </div>
+
+    <!-- Game Board -->
+    <div id="game" class="screen" style="display: none;">
+        <div class="game-header">
+            <h2>Monopoly</h2>
+            <div id="gameStatus" class="game-status"></div>
+        </div>
+        
+        <div class="game-container">
+            <!-- Left Sidebar -->
+            <div class="sidebar">
+                <div class="players-panel">
+                    <h3>Players</h3>
+                    <div id="playersList"></div>
+                </div>
+                
+                <div class="controls-panel">
+                    <div id="diceDisplay" class="dice-display"></div>
+                    <button id="rollDiceBtn" class="action-btn" disabled>Roll Dice</button>
+                    <button id="buyPropertyBtn" class="action-btn" style="display: none;">Buy Property</button>
+                    <button id="skipBuyBtn" class="action-btn secondary" style="display: none;">Skip</button>
+                    <div id="gameMessage" class="game-message"></div>
+                </div>
+            </div>
+
+            <!-- Game Board -->
+            <div class="board-container">
+                <div id="gameBoard" class="game-board"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
+
