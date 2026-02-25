@@ -314,42 +314,6 @@ body {
     transform: rotate(0deg);
 }
 
-.board-space.space-11,
-.board-space.space-12,
-.board-space.space-13,
-.board-space.space-14,
-.board-space.space-15,
-.board-space.space-16,
-.board-space.space-17,
-.board-space.space-18,
-.board-space.space-19 {
-    transform: rotate(90deg);
-}
-
-.board-space.space-21,
-.board-space.space-22,
-.board-space.space-23,
-.board-space.space-24,
-.board-space.space-25,
-.board-space.space-26,
-.board-space.space-27,
-.board-space.space-28,
-.board-space.space-29 {
-    transform: rotate(180deg);
-}
-
-.board-space.space-31,
-.board-space.space-32,
-.board-space.space-33,
-.board-space.space-34,
-.board-space.space-35,
-.board-space.space-36,
-.board-space.space-37,
-.board-space.space-38,
-.board-space.space-39 {
-    transform: rotate(270deg);
-}
-
 .board-space {
     border: 1px solid #8b4513;
     background: white;
@@ -429,10 +393,12 @@ body {
 
 .space-tokens {
     position: absolute;
-    bottom: 2px;
-    left: 2px;
+    top: 0;
+    left: 0;
     width: 100%;
-    height: 20px;
+    height: 100%;
+    pointer-events: none;
+    z-index: 5;
 }
 
 .player-token {

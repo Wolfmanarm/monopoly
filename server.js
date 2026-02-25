@@ -239,13 +239,23 @@ io.on('connection', (socket) => {
 
     broadcastGameState();
 
-    // If not doubles or buying, move to next player
-    if (!isDoubles && result.action !== 'canBuy') {
-      setTimeout(() => {
-        gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
-        gameState.gamePhase = 'rolling';
-        broadcastGameState();
-      }, 2000);
+    // Handle turn progression:
+    // - If result.action === 'canBuy', wait for buy/skip handlers
+    // - If doubles (and not buying), same player rolls again
+    // - Otherwise, advance to next player
+    if (result.action !== 'canBuy') {
+      if (isDoubles) {
+        setTimeout(() => {
+          gameState.gamePhase = 'rolling';
+          broadcastGameState();
+        }, 2000);
+      } else {
+        setTimeout(() => {
+          gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
+          gameState.gamePhase = 'rolling';
+          broadcastGameState();
+        }, 2000);
+      }
     }
   });
 
