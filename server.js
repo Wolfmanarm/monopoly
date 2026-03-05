@@ -23,6 +23,10 @@ let gameState = {
   gamePhase: 'waiting' // waiting, rolling, moving, buying, ended
 };
 
+function createPlayerId() {
+  return `p_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 // Board configuration (40 spaces)
 const BOARD_SPACES = [
   { id: 0, name: 'GO', type: 'special', color: null, price: 0, rent: 0 },
@@ -71,7 +75,26 @@ const BOARD_SPACES = [
 gameState.board = BOARD_SPACES.map(space => ({ ...space }));
 
 // Player colors
-const PLAYER_COLORS = ['#FF6B6B', '#4ECDC4', '#FFE66D', '#95E1D3', '#A8E6CF', '#FFD3A5'];
+const PLAYER_COLORS = ['#fa0000', '#0bf2e3', '#efca13', '#35e71a', '#2d00a8', '#fc870b'];
+
+const CHANCE_CARDS = [
+  { text: 'Advance to GO (Collect $200)', type: 'move', position: 0, collectGo: true },
+  { text: 'Bank pays you dividend of $50', type: 'money', amount: 50 },
+  { text: 'Get Out of Jail Free', type: 'getOutOfJail' },
+  { text: 'Pay poor tax of $15', type: 'money', amount: -15 },
+  { text: 'Advance to Illinois Avenue', type: 'move', position: 24, collectGo: true },
+  { text: 'Go to Jail. Go directly to Jail.', type: 'jail' },
+];
+
+const COMMUNITY_CHEST_CARDS = [
+  { text: 'Bank error in your favor. Collect $200', type: 'money', amount: 200 },
+  { text: 'Doctor\'s fee. Pay $50', type: 'money', amount: -50 },
+  { text: 'Get Out of Jail Free', type: 'getOutOfJail' },
+  { text: 'From sale of stock you get $50', type: 'money', amount: 50 },
+  { text: 'Pay school fees of $50', type: 'money', amount: -50 },
+  { text: 'Advance to GO (Collect $200)', type: 'move', position: 0, collectGo: true },
+  { text: 'Go to Jail. Go directly to Jail.', type: 'jail' },
+];
 
 // Broadcast game state to all clients
 function broadcastGameState() {
@@ -96,6 +119,69 @@ function calculateRent(space, owner) {
   return space.rent;
 }
 
+function drawRandomCard(cards) {
+  const index = Math.floor(Math.random() * cards.length);
+  return cards[index];
+}
+
+function movePlayerToPosition(player, newPosition, collectGo = false) {
+  const oldPosition = player.position;
+  const passedGo = newPosition < oldPosition;
+  player.position = newPosition;
+
+  if (collectGo && passedGo) {
+    player.money += 200;
+  }
+}
+
+function sendPlayerToJail(player) {
+  player.position = 10;
+  player.inJail = true;
+  player.jailTurns = 0;
+  player.hasPaidJailFine = false;
+  player.consecutiveDoubles = 0;
+}
+
+function applyCardEffect(player, spaceType) {
+  const isChance = spaceType === 'chance';
+  const deck = isChance ? CHANCE_CARDS : COMMUNITY_CHEST_CARDS;
+  const card = drawRandomCard(deck);
+
+  const result = {
+    action: isChance ? 'chanceCard' : 'chestCard',
+    cardText: card.text,
+  };
+
+  if (card.type === 'money') {
+    player.money += card.amount;
+    result.amount = card.amount;
+    return result;
+  }
+
+  if (card.type === 'move') {
+    movePlayerToPosition(player, card.position, !!card.collectGo);
+    result.newPosition = player.position;
+    result.newSpaceName = gameState.board[player.position]?.name;
+    return result;
+  }
+
+  if (card.type === 'jail') {
+    sendPlayerToJail(player);
+    result.newPosition = 10;
+    result.newSpaceName = 'JAIL';
+    return result;
+  }
+
+  if (card.type === 'getOutOfJail') {
+    player.getOutOfJailCards = (player.getOutOfJailCards || 0) + 1;
+    result.cardGranted = 'getOutOfJail';
+    result.getOutOfJailCards = player.getOutOfJailCards;
+    return result;
+  }
+
+  return result;
+}
+
 // Handle player landing on a space
 function handleLandOnSpace(player, space, diceRoll) {
   if (space.type === 'property' || space.type === 'railroad' || space.type === 'utility') {
@@ -117,17 +203,16 @@ function handleLandOnSpace(player, space, diceRoll) {
         ).length;
         rent = diceRoll * (utilityCount === 2 ? 10 : 4);
       }
-      
-      player.money -= rent;
-      owner.money += rent;
-      return { action: 'paidRent', rent: rent, owner: owner.name, propertyName: space.name };
+      // Defer actual money transfer until the player confirms payment
+      return { action: 'rentDue', rent: rent, ownerId: owner.id, owner: owner.name, propertyName: space.name, propertyId: space.id, diceRoll };
     }
   } else if (space.type === 'tax') {
     player.money -= space.amount;
     return { action: 'paidTax', amount: space.amount };
+  } else if (space.type === 'chance' || space.type === 'chest') {
+    return applyCardEffect(player, space.type);
   } else if (space.type === 'gotojail') {
-    player.position = 10;
-    player.inJail = true;
+    sendPlayerToJail(player);
     return { action: 'goToJail' };
   } else if (space.type === 'special' && space.name === 'GO') {
     player.money += 200;
@@ -156,13 +241,18 @@ io.on('connection', (socket) => {
     }
 
     const player = {
-      id: socket.id,
+      id: createPlayerId(),
+      socketId: socket.id,
       name: playerName,
       money: 1500,
       position: 0,
       properties: [],
       color: PLAYER_COLORS[gameState.players.length % PLAYER_COLORS.length],
-      inJail: false
+      inJail: false,
+      jailTurns: 0,
+      getOutOfJailCards: 0,
+      hasPaidJailFine: false,
+      consecutiveDoubles: 0
     };
 
     gameState.players.push(player);
@@ -192,7 +282,7 @@ io.on('connection', (socket) => {
   socket.on('rollDice', () => {
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     
-    if (socket.id !== currentPlayer.id) {
+    if (socket.id !== currentPlayer.socketId) {
       socket.emit('error', 'Not your turn');
       return;
     }
@@ -207,6 +297,106 @@ io.on('connection', (socket) => {
     const die2 = Math.floor(Math.random() * 6) + 1;
     const total = die1 + die2;
     const isDoubles = die1 === die2;
+
+    // Jail flow
+    let escapedJailByDoubles = false;
+    if (currentPlayer.inJail) {
+      if (currentPlayer.hasPaidJailFine) {
+        currentPlayer.hasPaidJailFine = false;
+        currentPlayer.inJail = false;
+        currentPlayer.jailTurns = 0;
+      } else if (isDoubles) {
+        currentPlayer.inJail = false;
+        currentPlayer.jailTurns = 0;
+        escapedJailByDoubles = true;
+      } else {
+        currentPlayer.jailTurns = (currentPlayer.jailTurns || 0) + 1;
+
+        // Third failed attempt: pay $50 and move using this roll
+        if (currentPlayer.jailTurns >= 3) {
+          currentPlayer.money -= 50;
+          currentPlayer.inJail = false;
+          currentPlayer.jailTurns = 0;
+          io.emit('diceRolled', {
+            playerId: currentPlayer.id,
+            playerName: currentPlayer.name,
+            spaceName: gameState.board[currentPlayer.position]?.name,
+            finalSpaceName: gameState.board[currentPlayer.position]?.name,
+            dice: [die1, die2],
+            total: total,
+            isDoubles: isDoubles,
+            result: {
+              action: 'jailThirdFailPaid',
+              amount: 50,
+            },
+            postCardResult: null
+          });
+        } else {
+          io.emit('diceRolled', {
+            playerId: currentPlayer.id,
+            playerName: currentPlayer.name,
+            spaceName: gameState.board[currentPlayer.position]?.name,
+            finalSpaceName: gameState.board[currentPlayer.position]?.name,
+            dice: [die1, die2],
+            total: total,
+            isDoubles: isDoubles,
+            result: {
+              action: 'jailStay',
+              turnsRemaining: 3 - currentPlayer.jailTurns,
+            },
+            postCardResult: null
+          });
+
+          gameState.gamePhase = 'waiting';
+          broadcastGameState();
+
+          setTimeout(() => {
+            currentPlayer.consecutiveDoubles = 0;
+            currentPlayer.hasPaidJailFine = false;
+            gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
+            gameState.gamePhase = 'rolling';
+            broadcastGameState();
+          }, 2000);
+          return;
+        }
+      }
+    }
+
+    // Handle three consecutive doubles (when not in jail)
+    if (!currentPlayer.inJail) {
+      if (isDoubles) {
+        currentPlayer.consecutiveDoubles = (currentPlayer.consecutiveDoubles || 0) + 1;
+      } else {
+        currentPlayer.consecutiveDoubles = 0;
+      }
+
+      if (currentPlayer.consecutiveDoubles >= 3) {
+        sendPlayerToJail(currentPlayer);
+        io.emit('diceRolled', {
+          playerId: currentPlayer.id,
+          playerName: currentPlayer.name,
+          spaceName: 'JAIL',
+          finalSpaceName: 'JAIL',
+          dice: [die1, die2],
+          total: total,
+          isDoubles: isDoubles,
+          result: {
+            action: 'goToJailByDoubles',
+          },
+          postCardResult: null
+        });
+
+        gameState.gamePhase = 'waiting';
+        broadcastGameState();
+
+        setTimeout(() => {
+          gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
+          gameState.gamePhase = 'rolling';
+          broadcastGameState();
+        }, 2000);
+        return;
+      }
+    }
 
     // Move player
     const oldPosition = currentPlayer.position;
@@ -223,10 +413,34 @@ io.on('connection', (socket) => {
     // Handle landing on space
     const space = gameState.board[newPosition];
     const result = handleLandOnSpace(currentPlayer, space, total);
+    let postCardResult = null;
+
+    // If a card moved the player, resolve the destination square too
+    if ((result.action === 'chanceCard' || result.action === 'chestCard') && Number.isInteger(result.newPosition)) {
+      const destinationSpace = gameState.board[currentPlayer.position];
+      if (destinationSpace && destinationSpace.type !== 'chance' && destinationSpace.type !== 'chest') {
+        postCardResult = handleLandOnSpace(currentPlayer, destinationSpace, total);
+      }
+    }
+
+    const finalResult = postCardResult || result;
 
     // Update game phase
-    if (result.action === 'canBuy') {
+    if (finalResult.action === 'canBuy') {
       gameState.gamePhase = 'buying';
+    } else if (finalResult.action === 'rentDue') {
+      // Create a pending rent object and wait for payer confirmation
+      console.log(`Rent due: payer=${currentPlayer.id}, owner=${finalResult.ownerId}, rent=${finalResult.rent}, property=${finalResult.propertyName}`);
+      gameState.pendingRent = {
+        payerId: currentPlayer.id,
+        ownerId: finalResult.ownerId,
+        rent: finalResult.rent,
+        propertyId: finalResult.propertyId,
+        propertyName: finalResult.propertyName,
+        isDoubles: isDoubles && !escapedJailByDoubles,
+        diceTotal: total,
+      };
+      gameState.gamePhase = 'payingRent';
     } else {
       gameState.gamePhase = 'waiting';
     }
@@ -235,11 +449,14 @@ io.on('connection', (socket) => {
     io.emit('diceRolled', {
       playerId: currentPlayer.id,
       playerName: currentPlayer.name,
+      ownerId: space.owner || null,
       spaceName: space.name,
+      finalSpaceName: gameState.board[currentPlayer.position]?.name,
       dice: [die1, die2],
       total: total,
       isDoubles: isDoubles,
-      result: result
+      result: result,
+      postCardResult: postCardResult
     });
 
     broadcastGameState();
@@ -248,14 +465,17 @@ io.on('connection', (socket) => {
     // - If result.action === 'canBuy', wait for buy/skip handlers
     // - If doubles (and not buying), same player rolls again
     // - Otherwise, advance to next player
-    if (result.action !== 'canBuy') {
-      if (isDoubles) {
+    // If renting is due we wait for the payer to confirm; otherwise handle turn progression
+    if (finalResult.action !== 'canBuy' && finalResult.action !== 'rentDue') {
+      if (isDoubles && !escapedJailByDoubles) {
         setTimeout(() => {
           gameState.gamePhase = 'rolling';
           broadcastGameState();
         }, 2000);
       } else {
         setTimeout(() => {
+          currentPlayer.consecutiveDoubles = 0;
+          currentPlayer.hasPaidJailFine = false;
           gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
           gameState.gamePhase = 'rolling';
           broadcastGameState();
@@ -264,11 +484,155 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Handle rent payment confirmation from payer
+  socket.on('payRent', () => {
+    const pending = gameState.pendingRent;
+    console.log(`payRent received from socket=${socket.id}`, { pending: !!pending });
+    if (!pending) {
+      socket.emit('error', 'No rent is pending');
+      return;
+    }
+
+    const payer = gameState.players.find(p => p.id === pending.payerId);
+    const owner = gameState.players.find(p => p.id === pending.ownerId);
+
+    if (!payer || !owner) {
+      socket.emit('error', 'Invalid payer or owner');
+      return;
+    }
+
+    if (socket.id !== payer.socketId) {
+      socket.emit('error', 'Only the owing player can confirm payment');
+      return;
+    }
+
+    if (gameState.gamePhase !== 'payingRent') {
+      socket.emit('error', 'Not currently expecting rent payment');
+      return;
+    }
+
+    // Check funds
+    if (payer.money < pending.rent) {
+      console.log(`Payer ${payer.id} has insufficient funds: ${payer.money} < ${pending.rent}`);
+      // Still allow negative balance for now, but notify
+      socket.emit('error', 'Not enough money to fully pay rent (will allow negative balance)');
+    }
+
+    // Process payment
+    payer.money -= pending.rent;
+    owner.money += pending.rent;
+
+    console.log(`Rent processed: ${payer.name} -> ${owner.name} $${pending.rent}`);
+
+    // Notify clients
+    io.emit('rentPaid', {
+      payerId: payer.id,
+      payerName: payer.name,
+      ownerId: owner.id,
+      ownerName: owner.name,
+      rent: pending.rent,
+      propertyName: pending.propertyName
+    });
+
+    // Clear pending rent and set phase
+    delete gameState.pendingRent;
+    gameState.gamePhase = 'waiting';
+    broadcastGameState();
+
+    // Advance turn (respect doubles)
+    if (pending.isDoubles) {
+      setTimeout(() => {
+        gameState.gamePhase = 'rolling';
+        broadcastGameState();
+      }, 1000);
+    } else {
+      setTimeout(() => {
+        payer.consecutiveDoubles = 0;
+        payer.hasPaidJailFine = false;
+        gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
+        gameState.gamePhase = 'rolling';
+        broadcastGameState();
+      }, 1000);
+    }
+  });
+
+  socket.on('payJailFine', () => {
+    const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+
+    if (!currentPlayer || socket.id !== currentPlayer.socketId) {
+      socket.emit('error', 'Not your turn');
+      return;
+    }
+
+    if (gameState.gamePhase !== 'rolling') {
+      socket.emit('error', 'Cannot pay jail fine right now');
+      return;
+    }
+
+    if (!currentPlayer.inJail) {
+      socket.emit('error', 'You are not in jail');
+      return;
+    }
+
+    if (currentPlayer.hasPaidJailFine) {
+      socket.emit('error', 'Jail fine already paid this turn');
+      return;
+    }
+
+    currentPlayer.money -= 50;
+    currentPlayer.hasPaidJailFine = true;
+
+    io.emit('jailFinePaid', {
+      playerId: currentPlayer.id,
+      playerName: currentPlayer.name,
+      amount: 50,
+    });
+
+    broadcastGameState();
+  });
+
+  socket.on('useGetOutOfJailCard', () => {
+    const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+
+    if (!currentPlayer || socket.id !== currentPlayer.socketId) {
+      socket.emit('error', 'Not your turn');
+      return;
+    }
+
+    if (gameState.gamePhase !== 'rolling') {
+      socket.emit('error', 'Cannot use card right now');
+      return;
+    }
+
+    if (!currentPlayer.inJail) {
+      socket.emit('error', 'You are not in jail');
+      return;
+    }
+
+    if ((currentPlayer.getOutOfJailCards || 0) <= 0) {
+      socket.emit('error', 'No Get Out of Jail Free cards available');
+      return;
+    }
+
+    currentPlayer.getOutOfJailCards -= 1;
+    currentPlayer.inJail = false;
+    currentPlayer.jailTurns = 0;
+    currentPlayer.hasPaidJailFine = false;
+
+    io.emit('usedGetOutOfJailCard', {
+      playerId: currentPlayer.id,
+      playerName: currentPlayer.name,
+      remainingCards: currentPlayer.getOutOfJailCards,
+    });
+
+    broadcastGameState();
+  });
+
   // Handle buying property
   socket.on('buyProperty', () => {
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     
-    if (socket.id !== currentPlayer.id) {
+    if (socket.id !== currentPlayer.socketId) {
       socket.emit('error', 'Not your turn');
       return;
     }
@@ -279,6 +643,12 @@ io.on('connection', (socket) => {
     }
 
     const space = gameState.board[currentPlayer.position];
+
+    const canOwnSpace = space.type === 'property' || space.type === 'railroad' || space.type === 'utility';
+    if (!canOwnSpace || space.price <= 0) {
+      socket.emit('error', 'This space cannot be purchased');
+      return;
+    }
     
     if (space.owner !== null) {
       socket.emit('error', 'Property already owned');
@@ -298,6 +668,7 @@ io.on('connection', (socket) => {
     gameState.gamePhase = 'waiting';
     io.emit('propertyBought', {
       playerId: currentPlayer.id,
+      playerName: currentPlayer.name,
       propertyName: space.name,
       price: space.price
     });
@@ -306,6 +677,8 @@ io.on('connection', (socket) => {
 
     // Move to next player after a delay
     setTimeout(() => {
+      currentPlayer.consecutiveDoubles = 0;
+      currentPlayer.hasPaidJailFine = false;
       gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
       gameState.gamePhase = 'rolling';
       broadcastGameState();
@@ -316,7 +689,7 @@ io.on('connection', (socket) => {
   socket.on('skipBuy', () => {
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     
-    if (socket.id !== currentPlayer.id) {
+    if (socket.id !== currentPlayer.socketId) {
       socket.emit('error', 'Not your turn');
       return;
     }
@@ -330,6 +703,8 @@ io.on('connection', (socket) => {
 
     // Move to next player
     setTimeout(() => {
+      currentPlayer.consecutiveDoubles = 0;
+      currentPlayer.hasPaidJailFine = false;
       gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
       gameState.gamePhase = 'rolling';
       broadcastGameState();
@@ -339,7 +714,7 @@ io.on('connection', (socket) => {
   // Handle player disconnect
   socket.on('disconnect', () => {
     console.log('Player disconnected:', socket.id);
-    gameState.players = gameState.players.filter(p => p.id !== socket.id);
+    gameState.players = gameState.players.filter(p => p.socketId !== socket.id);
     
     // If no players left, reset game
     if (gameState.players.length === 0) {
