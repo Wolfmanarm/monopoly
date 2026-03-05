@@ -3,6 +3,11 @@ const socket = io();
 
 let gameState = null;
 let currentPlayerId = null;
+// Track connection id when connected
+socket.on('connect', () => {
+    currentPlayerId = socket.id;
+    console.log('Socket connected:', socket.id);
+});
 
 // DOM Elements
 const lobbyScreen = document.getElementById('lobby');
@@ -38,6 +43,19 @@ startBtn.addEventListener('click', () => {
 
 // Roll dice
 rollDiceBtn.addEventListener('click', () => {
+    if (!gameState) return;
+
+    const currentPlayer = gameState.players?.[gameState.currentPlayerIndex];
+    const isMyTurn = currentPlayer && currentPlayer.socketId === socket.id;
+
+    if (gameState.gamePhase === 'payingRent' && isMyTurn && gameState.pendingRent && currentPlayer && gameState.pendingRent.payerId === currentPlayer.id) {
+        console.log('Pay Rent clicked via roll button — emitting payRent');
+        socket.emit('payRent');
+        rollDiceBtn.disabled = true;
+        gameMessage.textContent = 'Paying rent...';
+        return;
+    }
+
     socket.emit('rollDice');
 });
 
@@ -58,6 +76,7 @@ socket.on('gameState', (state) => {
 });
 
 socket.on('diceRolled', (data) => {
+    console.log('diceRolled event', data);
     displayDice(data.dice);
     const currentPlayer = gameState?.players?.find(player => player.id === data.playerId)
         || gameState?.players?.[gameState?.currentPlayerIndex];
@@ -67,6 +86,8 @@ socket.on('diceRolled', (data) => {
     
     if (data.result.action === 'paidRent') {
         gameMessage.textContent = `${playerName} pays $${data.result.rent} rent to ${data.result.owner} for ${data.result.propertyName || spaceName}`;
+    } else if (data.result.action === 'rentDue') {
+        gameMessage.textContent = `${playerName} owes $${data.result.rent} rent to ${data.result.owner} for ${data.result.propertyName || spaceName}`;
     } else if (data.result.action === 'paidTax') {
         gameMessage.textContent = `${playerName} pays $${data.result.amount} in taxes`;
     } else if (data.result.action === 'goToJail') {
@@ -82,14 +103,26 @@ socket.on('diceRolled', (data) => {
     updateUI();
 });
 
+// Rent paid event from server
+socket.on('rentPaid', (data) => {
+    console.log('rentPaid event', data);
+    gameMessage.textContent = `${data.payerName} paid $${data.rent} rent to ${data.ownerName} for ${data.propertyName}`;
+    updateUI();
+});
+
 socket.on('propertyBought', (data) => {
-    gameMessage.textContent = `${data.playerId === currentPlayerId ? 'You' : 'Player'} bought ${data.propertyName} for $${data.price}`;
+    gameMessage.textContent = `${data.playerName || 'Player'} bought ${data.propertyName} for $${data.price}`;
     updateUI();
 });
 
 socket.on('error', (message) => {
     gameMessage.textContent = `Error: ${message}`;
     console.error('Socket error:', message);
+});
+
+// Log unhandled promise rejections to help debug extension vs app issues
+window.addEventListener('unhandledrejection', (e) => {
+    console.error('Unhandled promise rejection:', e.reason, e);
 });
 
 // Update UI based on game state
@@ -274,9 +307,10 @@ function updatePlayersList() {
 
 function updateControls() {
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
-    const isMyTurn = currentPlayer && currentPlayer.id === socket.id;
+    const isMyTurn = currentPlayer && currentPlayer.socketId === socket.id;
 
-    // Roll dice button
+    // Default roll dice button state
+    rollDiceBtn.textContent = 'Roll Dice';
     rollDiceBtn.disabled = !isMyTurn || gameState.gamePhase !== 'rolling';
     
     // Buy property buttons
@@ -289,6 +323,21 @@ function updateControls() {
     } else {
         buyPropertyBtn.style.display = 'none';
         skipBuyBtn.style.display = 'none';
+    }
+
+    // Rent payment uses the roll button as a context action
+    if (gameState.gamePhase === 'payingRent' && gameState.pendingRent) {
+        const isPayer = isMyTurn && currentPlayer && gameState.pendingRent.payerId === currentPlayer.id;
+        rollDiceBtn.textContent = `Pay Rent: $${gameState.pendingRent.rent}`;
+        rollDiceBtn.disabled = !isPayer;
+        buyPropertyBtn.style.display = 'none';
+        skipBuyBtn.style.display = 'none';
+    }
+
+    // Legacy dedicated pay-rent button is hidden (rent now uses roll button)
+    const payRentBtn = document.getElementById('payRentBtn');
+    if (payRentBtn) {
+        payRentBtn.style.display = 'none';
     }
 }
 

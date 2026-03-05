@@ -23,6 +23,10 @@ let gameState = {
   gamePhase: 'waiting' // waiting, rolling, moving, buying, ended
 };
 
+function createPlayerId() {
+  return `p_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 // Board configuration (40 spaces)
 const BOARD_SPACES = [
   { id: 0, name: 'GO', type: 'special', color: null, price: 0, rent: 0 },
@@ -71,7 +75,7 @@ const BOARD_SPACES = [
 gameState.board = BOARD_SPACES.map(space => ({ ...space }));
 
 // Player colors
-const PLAYER_COLORS = ['#FF6B6B', '#4ECDC4', '#FFE66D', '#95E1D3', '#A8E6CF', '#FFD3A5'];
+const PLAYER_COLORS = ['#fa0000', '#0bf2e3', '#efca13', '#35e71a', '#2d00a8', '#fc870b'];
 
 // Broadcast game state to all clients
 function broadcastGameState() {
@@ -117,10 +121,8 @@ function handleLandOnSpace(player, space, diceRoll) {
         ).length;
         rent = diceRoll * (utilityCount === 2 ? 10 : 4);
       }
-      
-      player.money -= rent;
-      owner.money += rent;
-      return { action: 'paidRent', rent: rent, owner: owner.name, propertyName: space.name };
+      // Defer actual money transfer until the player confirms payment
+      return { action: 'rentDue', rent: rent, ownerId: owner.id, owner: owner.name, propertyName: space.name, propertyId: space.id, diceRoll };
     }
   } else if (space.type === 'tax') {
     player.money -= space.amount;
@@ -156,7 +158,8 @@ io.on('connection', (socket) => {
     }
 
     const player = {
-      id: socket.id,
+      id: createPlayerId(),
+      socketId: socket.id,
       name: playerName,
       money: 1500,
       position: 0,
@@ -192,7 +195,7 @@ io.on('connection', (socket) => {
   socket.on('rollDice', () => {
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     
-    if (socket.id !== currentPlayer.id) {
+    if (socket.id !== currentPlayer.socketId) {
       socket.emit('error', 'Not your turn');
       return;
     }
@@ -227,6 +230,19 @@ io.on('connection', (socket) => {
     // Update game phase
     if (result.action === 'canBuy') {
       gameState.gamePhase = 'buying';
+    } else if (result.action === 'rentDue') {
+      // Create a pending rent object and wait for payer confirmation
+      console.log(`Rent due: payer=${currentPlayer.id}, owner=${result.ownerId}, rent=${result.rent}, property=${result.propertyName}`);
+      gameState.pendingRent = {
+        payerId: currentPlayer.id,
+        ownerId: result.ownerId,
+        rent: result.rent,
+        propertyId: result.propertyId,
+        propertyName: result.propertyName,
+        isDoubles: isDoubles,
+        diceTotal: total,
+      };
+      gameState.gamePhase = 'payingRent';
     } else {
       gameState.gamePhase = 'waiting';
     }
@@ -235,6 +251,7 @@ io.on('connection', (socket) => {
     io.emit('diceRolled', {
       playerId: currentPlayer.id,
       playerName: currentPlayer.name,
+      ownerId: space.owner || null,
       spaceName: space.name,
       dice: [die1, die2],
       total: total,
@@ -248,7 +265,8 @@ io.on('connection', (socket) => {
     // - If result.action === 'canBuy', wait for buy/skip handlers
     // - If doubles (and not buying), same player rolls again
     // - Otherwise, advance to next player
-    if (result.action !== 'canBuy') {
+    // If renting is due we wait for the payer to confirm; otherwise handle turn progression
+    if (result.action !== 'canBuy' && result.action !== 'rentDue') {
       if (isDoubles) {
         setTimeout(() => {
           gameState.gamePhase = 'rolling';
@@ -264,11 +282,81 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Handle rent payment confirmation from payer
+  socket.on('payRent', () => {
+    const pending = gameState.pendingRent;
+    console.log(`payRent received from socket=${socket.id}`, { pending: !!pending });
+    if (!pending) {
+      socket.emit('error', 'No rent is pending');
+      return;
+    }
+
+    const payer = gameState.players.find(p => p.id === pending.payerId);
+    const owner = gameState.players.find(p => p.id === pending.ownerId);
+
+    if (!payer || !owner) {
+      socket.emit('error', 'Invalid payer or owner');
+      return;
+    }
+
+    if (socket.id !== payer.socketId) {
+      socket.emit('error', 'Only the owing player can confirm payment');
+      return;
+    }
+
+    if (gameState.gamePhase !== 'payingRent') {
+      socket.emit('error', 'Not currently expecting rent payment');
+      return;
+    }
+
+    // Check funds
+    if (payer.money < pending.rent) {
+      console.log(`Payer ${payer.id} has insufficient funds: ${payer.money} < ${pending.rent}`);
+      // Still allow negative balance for now, but notify
+      socket.emit('error', 'Not enough money to fully pay rent (will allow negative balance)');
+    }
+
+    // Process payment
+    payer.money -= pending.rent;
+    owner.money += pending.rent;
+
+    console.log(`Rent processed: ${payer.name} -> ${owner.name} $${pending.rent}`);
+
+    // Notify clients
+    io.emit('rentPaid', {
+      payerId: payer.id,
+      payerName: payer.name,
+      ownerId: owner.id,
+      ownerName: owner.name,
+      rent: pending.rent,
+      propertyName: pending.propertyName
+    });
+
+    // Clear pending rent and set phase
+    delete gameState.pendingRent;
+    gameState.gamePhase = 'waiting';
+    broadcastGameState();
+
+    // Advance turn (respect doubles)
+    if (pending.isDoubles) {
+      setTimeout(() => {
+        gameState.gamePhase = 'rolling';
+        broadcastGameState();
+      }, 1000);
+    } else {
+      setTimeout(() => {
+        gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
+        gameState.gamePhase = 'rolling';
+        broadcastGameState();
+      }, 1000);
+    }
+  });
+
   // Handle buying property
   socket.on('buyProperty', () => {
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     
-    if (socket.id !== currentPlayer.id) {
+    if (socket.id !== currentPlayer.socketId) {
       socket.emit('error', 'Not your turn');
       return;
     }
@@ -279,6 +367,12 @@ io.on('connection', (socket) => {
     }
 
     const space = gameState.board[currentPlayer.position];
+
+    const canOwnSpace = space.type === 'property' || space.type === 'railroad' || space.type === 'utility';
+    if (!canOwnSpace || space.price <= 0) {
+      socket.emit('error', 'This space cannot be purchased');
+      return;
+    }
     
     if (space.owner !== null) {
       socket.emit('error', 'Property already owned');
@@ -298,6 +392,7 @@ io.on('connection', (socket) => {
     gameState.gamePhase = 'waiting';
     io.emit('propertyBought', {
       playerId: currentPlayer.id,
+      playerName: currentPlayer.name,
       propertyName: space.name,
       price: space.price
     });
@@ -316,7 +411,7 @@ io.on('connection', (socket) => {
   socket.on('skipBuy', () => {
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     
-    if (socket.id !== currentPlayer.id) {
+    if (socket.id !== currentPlayer.socketId) {
       socket.emit('error', 'Not your turn');
       return;
     }
@@ -339,7 +434,7 @@ io.on('connection', (socket) => {
   // Handle player disconnect
   socket.on('disconnect', () => {
     console.log('Player disconnected:', socket.id);
-    gameState.players = gameState.players.filter(p => p.id !== socket.id);
+    gameState.players = gameState.players.filter(p => p.socketId !== socket.id);
     
     // If no players left, reset game
     if (gameState.players.length === 0) {
