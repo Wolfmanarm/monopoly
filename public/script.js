@@ -22,6 +22,8 @@ const playersList = document.getElementById('playersList');
 const rollDiceBtn = document.getElementById('rollDiceBtn');
 const buyPropertyBtn = document.getElementById('buyPropertyBtn');
 const skipBuyBtn = document.getElementById('skipBuyBtn');
+const payJailFineBtn = document.getElementById('payJailFineBtn');
+const useJailCardBtn = document.getElementById('useJailCardBtn');
 const gameMessage = document.getElementById('gameMessage');
 const gameStatus = document.getElementById('gameStatus');
 const controlsTurnStatus = document.getElementById('controlsTurnStatus');
@@ -69,6 +71,14 @@ skipBuyBtn.addEventListener('click', () => {
     socket.emit('skipBuy');
 });
 
+payJailFineBtn.addEventListener('click', () => {
+    socket.emit('payJailFine');
+});
+
+useJailCardBtn.addEventListener('click', () => {
+    socket.emit('useGetOutOfJailCard');
+});
+
 // Socket event listeners
 socket.on('gameState', (state) => {
     gameState = state;
@@ -92,6 +102,12 @@ socket.on('diceRolled', (data) => {
         gameMessage.textContent = `${playerName} pays $${data.result.amount} in taxes`;
     } else if (data.result.action === 'goToJail') {
         gameMessage.textContent = `${playerName} goes to jail!`;
+    } else if (data.result.action === 'goToJailByDoubles') {
+        gameMessage.textContent = `${playerName} rolled three doubles in a row and goes to jail!`;
+    } else if (data.result.action === 'jailStay') {
+        gameMessage.textContent = `${playerName} did not roll doubles and stays in jail (${data.result.turnsRemaining} attempts left).`;
+    } else if (data.result.action === 'jailThirdFailPaid') {
+        gameMessage.textContent = `${playerName} failed their 3rd jail roll, paid $${data.result.amount}, and now moves normally.`;
     } else if (data.result.action === 'passedGo') {
         gameMessage.textContent = `${playerName} passed GO! Collect $200`;
     } else if (data.result.action === 'canBuy') {
@@ -101,6 +117,7 @@ socket.on('diceRolled', (data) => {
         const moneyText = typeof data.result.amount === 'number'
             ? ` ${data.result.amount >= 0 ? `Collect $${data.result.amount}` : `Pay $${Math.abs(data.result.amount)}`}.`
             : '';
+        const cardText = data.result.cardGranted === 'getOutOfJail' ? ' Received a Get Out of Jail Free card.' : '';
         let followUpText = '';
         if (data.postCardResult?.action === 'canBuy') {
             const followUpSpace = data.postCardResult.space?.name || data.finalSpaceName || 'this property';
@@ -109,12 +126,13 @@ socket.on('diceRolled', (data) => {
         } else if (data.postCardResult?.action === 'rentDue') {
             followUpText = ` ${playerName} owes $${data.postCardResult.rent} rent to ${data.postCardResult.owner} for ${data.postCardResult.propertyName}.`;
         }
-        gameMessage.textContent = `${playerName} drew Chance: ${data.result.cardText}.${movementText}${moneyText}${followUpText}`;
+        gameMessage.textContent = `${playerName} drew Chance: ${data.result.cardText}.${movementText}${moneyText}${cardText}${followUpText}`;
     } else if (data.result.action === 'chestCard') {
         const movementText = data.result.newSpaceName ? ` Moved to ${data.result.newSpaceName}.` : '';
         const moneyText = typeof data.result.amount === 'number'
             ? ` ${data.result.amount >= 0 ? `Collect $${data.result.amount}` : `Pay $${Math.abs(data.result.amount)}`}.`
             : '';
+        const cardText = data.result.cardGranted === 'getOutOfJail' ? ' Received a Get Out of Jail Free card.' : '';
         let followUpText = '';
         if (data.postCardResult?.action === 'canBuy') {
             const followUpSpace = data.postCardResult.space?.name || data.finalSpaceName || 'this property';
@@ -123,7 +141,7 @@ socket.on('diceRolled', (data) => {
         } else if (data.postCardResult?.action === 'rentDue') {
             followUpText = ` ${playerName} owes $${data.postCardResult.rent} rent to ${data.postCardResult.owner} for ${data.postCardResult.propertyName}.`;
         }
-        gameMessage.textContent = `${playerName} drew Community Chest: ${data.result.cardText}.${movementText}${moneyText}${followUpText}`;
+        gameMessage.textContent = `${playerName} drew Community Chest: ${data.result.cardText}.${movementText}${moneyText}${cardText}${followUpText}`;
     } else {
         gameMessage.textContent = `${playerName} rolled ${data.total} (${data.dice[0]} + ${data.dice[1]})`;
     }
@@ -140,6 +158,16 @@ socket.on('rentPaid', (data) => {
 
 socket.on('propertyBought', (data) => {
     gameMessage.textContent = `${data.playerName || 'Player'} bought ${data.propertyName} for $${data.price}`;
+    updateUI();
+});
+
+socket.on('jailFinePaid', (data) => {
+    gameMessage.textContent = `${data.playerName} paid $${data.amount} to get out of jail and may roll now.`;
+    updateUI();
+});
+
+socket.on('usedGetOutOfJailCard', (data) => {
+    gameMessage.textContent = `${data.playerName} used a Get Out of Jail Free card.`;
     updateUI();
 });
 
@@ -360,6 +388,17 @@ function updateControls() {
         rollDiceBtn.disabled = !isPayer;
         buyPropertyBtn.style.display = 'none';
         skipBuyBtn.style.display = 'none';
+    }
+
+    // Jail controls
+    payJailFineBtn.style.display = 'none';
+    useJailCardBtn.style.display = 'none';
+    if (gameState.gamePhase === 'rolling' && isMyTurn && currentPlayer?.inJail) {
+        rollDiceBtn.textContent = 'Roll for Doubles (Jail)';
+        payJailFineBtn.style.display = currentPlayer.hasPaidJailFine ? 'none' : 'block';
+        payJailFineBtn.disabled = !!currentPlayer.hasPaidJailFine;
+        useJailCardBtn.style.display = currentPlayer.getOutOfJailCards > 0 ? 'block' : 'none';
+        useJailCardBtn.disabled = currentPlayer.getOutOfJailCards <= 0;
     }
 
     // Legacy dedicated pay-rent button is hidden (rent now uses roll button)
