@@ -29,6 +29,8 @@ const gameStatus = document.getElementById('gameStatus');
 const controlsTurnStatus = document.getElementById('controlsTurnStatus');
 const diceDisplay = document.getElementById('diceDisplay');
 const buildingControls = document.getElementById('buildingControls');
+const howToPlayToggle = document.getElementById('howToPlayToggle');
+const howToPlayContent = document.getElementById('howToPlayContent');
 
 // Join game
 joinBtn.addEventListener('click', () => {
@@ -71,6 +73,14 @@ buyPropertyBtn.addEventListener('click', () => {
 skipBuyBtn.addEventListener('click', () => {
     socket.emit('skipBuy');
 });
+
+// How to Play toggle
+if (howToPlayToggle && howToPlayContent) {
+    howToPlayToggle.addEventListener('click', () => {
+        const isHidden = howToPlayContent.style.display === 'none' || howToPlayContent.style.display === '';
+        howToPlayContent.style.display = isHidden ? 'block' : 'none';
+    });
+}
 
 payJailFineBtn.addEventListener('click', () => {
     socket.emit('payJailFine');
