@@ -133,6 +133,30 @@ body {
     align-items: flex-start;
 }
 
+.how-to-play-container {
+    margin-top: 20px;
+    max-width: 800px;
+}
+
+.how-to-play-button {
+    width: 100%;
+}
+
+.how-to-play-content {
+    margin-top: 10px;
+    background: white;
+    border-radius: 12px;
+    padding: 16px 20px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.how-to-play-content ul {
+    margin-left: 18px;
+    margin-top: 8px;
+}
+
 /* Sidebar */
 .sidebar {
     width: 300px;
