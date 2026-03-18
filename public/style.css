@@ -514,3 +514,35 @@ body {
     }
 }
 
+#buildingControls {
+    margin-top: 12px;
+    padding: 10px;
+    background: #f5f5f5;
+    border-radius: 8px;
+}
+
+.building-controls-title {
+    font-weight: bold;
+    margin-bottom: 8px;
+}
+
+.building-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.building-markers {
+    margin-top: 4px;
+    display: flex;
+    gap: 2px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.house-marker,
+.hotel-marker {
+    font-size: 12px;
+}
