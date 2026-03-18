@@ -28,6 +28,7 @@ const gameMessage = document.getElementById('gameMessage');
 const gameStatus = document.getElementById('gameStatus');
 const controlsTurnStatus = document.getElementById('controlsTurnStatus');
 const diceDisplay = document.getElementById('diceDisplay');
+const buildingControls = document.getElementById('buildingControls');
 const howToPlayToggle = document.getElementById('howToPlayToggle');
 const howToPlayContent = document.getElementById('howToPlayContent');
 
@@ -186,6 +187,15 @@ socket.on('error', (message) => {
     console.error('Socket error:', message);
 });
 
+socket.on('buildingBought', (data) => {
+    if (data.buildingType === 'hotel') {
+        gameMessage.textContent = `${data.playerName} bought a hotel on ${data.propertyName} for $${data.cost}`;
+    } else {
+        gameMessage.textContent = `${data.playerName} bought a house on ${data.propertyName} for $${data.cost}`;
+    }
+    updateUI();
+});
+
 // Log unhandled promise rejections to help debug extension vs app issues
 window.addEventListener('unhandledrejection', (e) => {
     console.error('Unhandled promise rejection:', e.reason, e);
@@ -331,14 +341,15 @@ function createSpace(spaceId, row, col) {
     const ownerColor = owner ? owner.color : null;
     
     spaceDiv.innerHTML = `
-        <div class="space-content">
-            ${space.color ? `<div class="color-bar" style="background-color: ${getColorHex(space.color)}"></div>` : ''}
-            ${ownerColor ? `<div class="owner-indicator" style="background-color: ${ownerColor}"></div>` : ''}
-            <div class="space-name">${space.name}</div>
-            ${space.price > 0 ? `<div class="space-price">$${space.price}</div>` : ''}
-            ${space.amount ? `<div class="space-price">$${space.amount}</div>` : ''}
-        </div>
-        <div class="space-tokens"></div>
+    <div class="space-content">
+        ${space.color ? `<div class="color-bar" style="background-color: ${getColorHex(space.color)}"></div>` : ''}
+        ${ownerColor ? `<div class="owner-indicator" style="background-color: ${ownerColor}"></div>` : ''}
+        <div class="space-name">${space.name}</div>
+        ${space.price > 0 ? `<div class="space-price">$${space.price}</div>` : ''}
+        ${space.amount ? `<div class="space-price">$${space.amount}</div>` : ''}
+        ${renderBuildingMarkers(space)}
+    </div>
+    <div class="space-tokens"></div>
     `;
     gameBoard.appendChild(spaceDiv);
 }
@@ -416,6 +427,58 @@ function updateControls() {
     if (payRentBtn) {
         payRentBtn.style.display = 'none';
     }
+
+    updateBuildingControls(currentPlayer, isMyTurn);
+}
+
+function updateBuildingControls(currentPlayer, isMyTurn) {
+    if (!buildingControls) return;
+
+    buildingControls.innerHTML = '';
+
+    if (!currentPlayer || !isMyTurn) return;
+
+    if (!['rolling', 'buying'].includes(gameState.gamePhase)) return;
+
+    const ownedBuildableProperties = currentPlayer.properties
+        .map(propertyId => gameState.board[propertyId])
+        .filter(space => space && space.type === 'property' && space.color && space.houseCost);
+
+    const eligibleSetProperties = ownedBuildableProperties.filter(space =>
+        playerOwnsFullSetLocal(currentPlayer, space.color)
+    );
+
+    if (eligibleSetProperties.length === 0) return;
+
+    const title = document.createElement('div');
+    title.className = 'building-controls-title';
+    title.textContent = 'Buy Houses / Hotels';
+    buildingControls.appendChild(title);
+
+    eligibleSetProperties.forEach(space => {
+        const row = document.createElement('div');
+        row.className = 'building-row';
+
+        const currentCount = space.hotel ? 'Hotel' : `${space.houses || 0} house(s)`;
+        const nextLabel = space.hotel
+            ? 'Maxed'
+            : ((space.houses || 0) < 4 ? 'Buy House' : 'Buy Hotel');
+
+        const info = document.createElement('span');
+        info.textContent = `${space.name} — ${currentCount}`;
+
+        const button = document.createElement('button');
+        button.textContent = `${nextLabel} ($${space.houseCost})`;
+        button.disabled = !canBuildOnPropertyLocal(currentPlayer, space.id);
+
+        button.addEventListener('click', () => {
+            socket.emit('buyBuilding', { propertyId: space.id });
+        });
+
+        row.appendChild(info);
+        row.appendChild(button);
+        buildingControls.appendChild(row);
+    });
 }
 
 function displayDice(dice) {
@@ -477,5 +540,86 @@ function getPlayerPropertyNames(player) {
     return player.properties
         .map(propertyID => gameState.board[propertyID]?.name)
         .filter(Boolean);
+}
+
+//purpose: check if play owns all of a color group to let them buy houses and hotels
+function playerOwnsFullSetLocal(player, color) {
+    const groups = {
+        brown: [1, 3],
+        lightblue: [6, 8, 9],
+        pink: [11, 13, 14],
+        orange: [16, 18, 19],
+        red: [21, 23, 24],
+        yellow: [26, 27, 29],
+        green: [31, 32, 34],
+        darkblue: [37, 39]
+    };
+
+    const group = groups[color];
+    if (!group) return false;
+    return group.every(id => player.properties.includes(id));
+}
+
+function getLocalBuildingCount(space) {
+    return space.hotel ? 5 : (space.houses || 0);
+}
+
+function canBuildOnPropertyLocal(player, propertyId) {
+    const property = gameState.board[propertyId];
+    if (!property || property.type !== 'property' || !property.color || !property.houseCost) {
+        return false;
+    }
+
+    if (!player.properties.includes(propertyId)) {
+        return false;
+    }
+
+    if (!playerOwnsFullSetLocal(player, property.color)) {
+        return false;
+    }
+
+    if (property.hotel) {
+        return false;
+    }
+
+    const groups = {
+        brown: [1, 3],
+        lightblue: [6, 8, 9],
+        pink: [11, 13, 14],
+        orange: [16, 18, 19],
+        red: [21, 23, 24],
+        yellow: [26, 27, 29],
+        green: [31, 32, 34],
+        darkblue: [37, 39]
+    };
+
+    const groupIds = groups[property.color] || [];
+    const groupSpaces = groupIds.map(id => gameState.board[id]);
+
+    const propertyCount = getLocalBuildingCount(property);
+    const minCount = Math.min(...groupSpaces.map(getLocalBuildingCount));
+
+    if (propertyCount > minCount) {
+        return false;
+    }
+
+    return player.money >= property.houseCost;
+}
+
+function renderBuildingMarkers(space) {
+    if (!space || space.type !== 'property') return '';
+
+    if (space.hotel) {
+        return `<div class="building-markers"><span class="hotel-marker">🏨</span></div>`;
+    }
+
+    const houses = space.houses || 0;
+    if (houses <= 0) return '';
+
+    return `
+        <div class="building-markers">
+            ${Array.from({ length: houses }).map(() => `<span class="house-marker">🏠</span>`).join('')}
+        </div>
+    `;
 }
 
