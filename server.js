@@ -21,7 +21,8 @@ let gameState = {
   currentPlayerIndex: 0,
   board: [],
   gameStarted: false,
-  gamePhase: 'waiting' // waiting, rolling, moving, buying, ended
+  gamePhase: 'waiting', // waiting, rolling, moving, buying, ended
+  pendingExtraTurn: false
 };
 
 function createPlayerId() {
@@ -593,7 +594,9 @@ io.on('connection', (socket) => {
     // Update game phase
     if (finalResult.action === 'canBuy') {
       gameState.gamePhase = 'buying';
+      gameState.pendingExtraTurn = isDoubles && !escapedJailByDoubles;
     } else if (finalResult.action === 'rentDue') {
+      gameState.pendingExtraTurn = false;
       // Create a pending rent object and wait for payer confirmation
       console.log(`Rent due: payer=${currentPlayer.id}, owner=${finalResult.ownerId}, rent=${finalResult.rent}, property=${finalResult.propertyName}`);
       gameState.pendingRent = {
@@ -608,6 +611,7 @@ io.on('connection', (socket) => {
       gameState.gamePhase = 'payingRent';
     } else {
       gameState.gamePhase = 'waiting';
+      gameState.pendingExtraTurn = false;
     }
 
     // Broadcast dice result and game state
@@ -797,7 +801,12 @@ io.on('connection', (socket) => {
   // Handle buying property
   socket.on('buyProperty', () => {
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
-    
+
+    if (!currentPlayer) {
+      socket.emit('error', 'No current player');
+      return;
+    }
+
     if (socket.id !== currentPlayer.socketId) {
       socket.emit('error', 'Not your turn');
       return;
@@ -810,12 +819,16 @@ io.on('connection', (socket) => {
 
     const space = gameState.board[currentPlayer.position];
 
-    const canOwnSpace = space.type === 'property' || space.type === 'railroad' || space.type === 'utility';
+    const canOwnSpace =
+      space.type === 'property' ||
+      space.type === 'railroad' ||
+      space.type === 'utility';
+
     if (!canOwnSpace || space.price <= 0) {
       socket.emit('error', 'This space cannot be purchased');
       return;
     }
-    
+
     if (space.owner !== null) {
       socket.emit('error', 'Property already owned');
       return;
@@ -831,6 +844,8 @@ io.on('connection', (socket) => {
     space.owner = currentPlayer.id;
     currentPlayer.properties.push(space.id);
 
+    const keepTurnForDoubles = !!gameState.pendingExtraTurn;
+
     gameState.gamePhase = 'waiting';
     io.emit('propertyBought', {
       playerId: currentPlayer.id,
@@ -841,20 +856,35 @@ io.on('connection', (socket) => {
 
     broadcastGameState();
 
-    // Move to next player after a delay
     setTimeout(() => {
-      currentPlayer.consecutiveDoubles = 0;
-      currentPlayer.hasPaidJailFine = false;
-      gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
-      gameState.gamePhase = 'rolling';
+      gameState.pendingExtraTurn = false;
+
+      if (keepTurnForDoubles) {
+        // Same player keeps turn after doubles
+        gameState.gamePhase = 'rolling';
+      } else {
+        // Normal turn progression
+        currentPlayer.consecutiveDoubles = 0;
+        currentPlayer.hasPaidJailFine = false;
+        gameState.currentPlayerIndex =
+          (gameState.currentPlayerIndex + 1) % gameState.players.length;
+        gameState.gamePhase = 'rolling';
+      }
+
       broadcastGameState();
     }, 2000);
   });
 
   // Handle skipping property purchase
+  
   socket.on('skipBuy', () => {
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
-    
+
+    if (!currentPlayer) {
+      socket.emit('error', 'No current player');
+      return;
+    }
+
     if (socket.id !== currentPlayer.socketId) {
       socket.emit('error', 'Not your turn');
       return;
@@ -864,18 +894,29 @@ io.on('connection', (socket) => {
       return;
     }
 
+    const keepTurnForDoubles = !!gameState.pendingExtraTurn;
+
     gameState.gamePhase = 'waiting';
     broadcastGameState();
 
-    // Move to next player
     setTimeout(() => {
-      currentPlayer.consecutiveDoubles = 0;
-      currentPlayer.hasPaidJailFine = false;
-      gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
-      gameState.gamePhase = 'rolling';
+      gameState.pendingExtraTurn = false;
+
+      if (keepTurnForDoubles) {
+        // Same player keeps turn after doubles
+        gameState.gamePhase = 'rolling';
+      } else {
+        currentPlayer.consecutiveDoubles = 0;
+        currentPlayer.hasPaidJailFine = false;
+        gameState.currentPlayerIndex =
+          (gameState.currentPlayerIndex + 1) % gameState.players.length;
+        gameState.gamePhase = 'rolling';
+      }
+
       broadcastGameState();
     }, 1000);
   });
+``
 
   // Handle buying a house or hotel
   socket.on('buyBuilding', ({ propertyId }) => {
@@ -934,6 +975,7 @@ io.on('connection', (socket) => {
       gameState.gameStarted = false;
       gameState.currentPlayerIndex = 0;
       gameState.gamePhase = 'waiting';
+      gameState.pendingExtraTurn = false;
       // Reset board ownership
       gameState.board = createBoardState();
       delete gameState.pendingRent;
