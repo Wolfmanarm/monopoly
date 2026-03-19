@@ -3,8 +3,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import mysql from 'mysql2/promise';
-
+import { registerDevTools } from './devTools.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -22,8 +21,11 @@ let gameState = {
   currentPlayerIndex: 0,
   board: [],
   gameStarted: false,
-  gamePhase: 'waiting' // waiting, rolling, moving, buying, ended
+  gamePhase: 'waiting', // waiting, rolling, moving, buying, ended
+  pendingExtraTurn: false
 };
+// Pending trades: array of { id, fromId, toId, offer: { money, properties }, request: { money, properties }, timestamp }
+gameState.pendingTrades = [];
 
 function createPlayerId() {
   return `p_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
@@ -74,7 +76,7 @@ const BOARD_SPACES = [
 ];
 
 // Initialize board in game state
-gameState.board = BOARD_SPACES.map(space => ({ ...space }));
+
 
 // Player colors
 const PLAYER_COLORS = ['#fa0000', '#0bf2e3', '#efca13', '#35e71a', '#2d00a8', '#fc870b'];
@@ -98,6 +100,142 @@ const COMMUNITY_CHEST_CARDS = [
   { text: 'Go to Jail. Go directly to Jail.', type: 'jail' },
 ];
 
+const COLOR_GROUPS = {
+  brown: [1, 3],
+  lightblue: [6, 8, 9],
+  pink: [11, 13, 14],
+  orange: [16, 18, 19],
+  red: [21, 23, 24],
+  yellow: [26, 27, 29],
+  green: [31, 32, 34],
+  darkblue: [37, 39],
+};
+
+const BUILDABLE_PROPERTY_DATA = {
+  1:  { houseCost: 50,  rent: [2, 10, 30, 90, 160, 250] },
+  3:  { houseCost: 50,  rent: [4, 20, 60, 180, 320, 450] },
+
+  6:  { houseCost: 50,  rent: [6, 30, 90, 270, 400, 550] },
+  8:  { houseCost: 50,  rent: [6, 30, 90, 270, 400, 550] },
+  9:  { houseCost: 50,  rent: [8, 40, 100, 300, 450, 600] },
+
+  11: { houseCost: 100, rent: [10, 50, 150, 450, 625, 750] },
+  13: { houseCost: 100, rent: [10, 50, 150, 450, 625, 750] },
+  14: { houseCost: 100, rent: [12, 60, 180, 500, 700, 900] },
+
+  16: { houseCost: 100, rent: [14, 70, 200, 550, 750, 950] },
+  18: { houseCost: 100, rent: [14, 70, 200, 550, 750, 950] },
+  19: { houseCost: 100, rent: [16, 80, 220, 600, 800, 1000] },
+
+  21: { houseCost: 150, rent: [18, 90, 250, 700, 875, 1050] },
+  23: { houseCost: 150, rent: [18, 90, 250, 700, 875, 1050] },
+  24: { houseCost: 150, rent: [20, 100, 300, 750, 925, 1100] },
+
+  26: { houseCost: 150, rent: [22, 110, 330, 800, 975, 1150] },
+  27: { houseCost: 150, rent: [22, 110, 330, 800, 975, 1150] },
+  29: { houseCost: 150, rent: [24, 120, 360, 850, 1025, 1200] },
+
+  31: { houseCost: 200, rent: [26, 130, 390, 900, 1100, 1275] },
+  32: { houseCost: 200, rent: [26, 130, 390, 900, 1100, 1275] },
+  34: { houseCost: 200, rent: [28, 150, 450, 1000, 1200, 1400] },
+
+  37: { houseCost: 200, rent: [35, 175, 500, 1100, 1300, 1500] },
+  39: { houseCost: 200, rent: [50, 200, 600, 1400, 1700, 2000] },
+};
+
+function createBoardState() {
+  return BOARD_SPACES.map(space => {
+    const buildableData = BUILDABLE_PROPERTY_DATA[space.id];
+
+    if (buildableData) {
+      return {
+        ...space,
+        houseCost: buildableData.houseCost,
+        rent: buildableData.rent,
+        houses: 0,
+        hotel: false,
+      };
+    }
+
+    return { ...space };
+  });
+}
+
+gameState.board = createBoardState();
+
+function isBuildableStreet(space) {
+  return !!space &&
+    space.type === 'property' &&
+    !!space.color &&
+    !!COLOR_GROUPS[space.color] &&
+    !!BUILDABLE_PROPERTY_DATA[space.id];
+}
+
+function getBuildingCount(space) {
+  if (!space) return 0;
+  return space.hotel ? 5 : (space.houses || 0);
+}
+
+function playerOwnsFullSet(state, player, color) {
+  const group = COLOR_GROUPS[color];
+  if (!group) return false;
+  return group.every(propertyId => player.properties.includes(propertyId));
+}
+
+function canBuildOnProperty(state, player, propertyId) {
+  const property = state.board[propertyId];
+
+  if (!property) {
+    return { ok: false, reason: 'Property not found.' };
+  }
+
+  if (!isBuildableStreet(property)) {
+    return { ok: false, reason: 'You cannot build on this property.' };
+  }
+
+  if (!player.properties.includes(propertyId)) {
+    return { ok: false, reason: 'You do not own this property.' };
+  }
+
+  if (!playerOwnsFullSet(state, player, property.color)) {
+    return { ok: false, reason: 'You must own the full color set first.' };
+  }
+
+  if (property.hotel) {
+    return { ok: false, reason: 'This property already has a hotel.' };
+  }
+
+  const groupIds = COLOR_GROUPS[property.color];
+  const groupSpaces = groupIds.map(id => state.board[id]);
+
+  const propertyCount = getBuildingCount(property);
+  const minCount = Math.min(...groupSpaces.map(getBuildingCount));
+
+  // Even-building rule
+  if (propertyCount > minCount) {
+    return { ok: false, reason: 'Buildings must be added evenly across the color set.' };
+  }
+
+  const cost = property.houseCost || 0;
+  if (player.money < cost) {
+    return { ok: false, reason: `Not enough money. Need $${cost}.` };
+  }
+
+  return { ok: true, cost };
+}
+
+function buildOnProperty(property) {
+  if (property.hotel) return null;
+
+  if ((property.houses || 0) < 4) {
+    property.houses = (property.houses || 0) + 1;
+    return 'house';
+  }
+
+  property.houses = 0;
+  property.hotel = true;
+  return 'hotel';
+}
 // Broadcast game state to all clients
 function broadcastGameState() {
   io.emit('gameState', gameState);
@@ -106,19 +244,40 @@ function broadcastGameState() {
 // Calculate rent for a property
 function calculateRent(space, owner) {
   if (space.type === 'railroad') {
-    const railroadCount = gameState.board.filter(s => 
+    const railroadCount = gameState.board.filter(s =>
       s.type === 'railroad' && s.owner === owner.id
     ).length;
-    return space.rent * railroadCount;
+    if (railroadCount <= 0) return 0;
+    return space.rent * Math.pow(2, railroadCount - 1);
   }
+
   if (space.type === 'utility') {
-    const utilityCount = gameState.board.filter(s => 
-      s.type === 'utility' && s.owner === owner.id
-    ).length;
-    // For utilities, rent is 4x dice roll for 1 utility, 10x for 2
-    return 0; // Will be calculated with dice roll
+    return 0; // utility rent still handled with dice later
   }
-  return space.rent;
+
+  if (space.type === 'property') {
+    if (Array.isArray(space.rent)) {
+      if (space.hotel) {
+        return space.rent[5];
+      }
+
+      const houses = space.houses || 0;
+      if (houses > 0) {
+        return space.rent[houses];
+      }
+
+      // Monopoly bonus: if full set owned and no buildings, double base rent
+      if (space.color && playerOwnsFullSet(gameState, owner, space.color)) {
+        return space.rent[0] * 2;
+      }
+
+      return space.rent[0];
+    }
+
+    return space.rent;
+  }
+
+  return 0;
 }
 
 function drawRandomCard(cards) {
@@ -229,6 +388,14 @@ io.on('connection', (socket) => {
 
   // Send current game state to newly connected client
   socket.emit('gameState', gameState);
+
+
+  registerDevTools(io, socket, gameState, {
+      COLOR_GROUPS,
+      broadcastGameState
+  });
+
+
 
   // Handle player joining
   socket.on('joinGame', (playerName) => {
@@ -430,7 +597,9 @@ io.on('connection', (socket) => {
     // Update game phase
     if (finalResult.action === 'canBuy') {
       gameState.gamePhase = 'buying';
+      gameState.pendingExtraTurn = isDoubles && !escapedJailByDoubles;
     } else if (finalResult.action === 'rentDue') {
+      gameState.pendingExtraTurn = false;
       // Create a pending rent object and wait for payer confirmation
       console.log(`Rent due: payer=${currentPlayer.id}, owner=${finalResult.ownerId}, rent=${finalResult.rent}, property=${finalResult.propertyName}`);
       gameState.pendingRent = {
@@ -445,6 +614,7 @@ io.on('connection', (socket) => {
       gameState.gamePhase = 'payingRent';
     } else {
       gameState.gamePhase = 'waiting';
+      gameState.pendingExtraTurn = false;
     }
 
     // Broadcast dice result and game state
@@ -484,6 +654,7 @@ io.on('connection', (socket) => {
         }, 2000);
       }
     }
+    
   });
 
   // Handle rent payment confirmation from payer
@@ -633,7 +804,12 @@ io.on('connection', (socket) => {
   // Handle buying property
   socket.on('buyProperty', () => {
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
-    
+
+    if (!currentPlayer) {
+      socket.emit('error', 'No current player');
+      return;
+    }
+
     if (socket.id !== currentPlayer.socketId) {
       socket.emit('error', 'Not your turn');
       return;
@@ -646,12 +822,16 @@ io.on('connection', (socket) => {
 
     const space = gameState.board[currentPlayer.position];
 
-    const canOwnSpace = space.type === 'property' || space.type === 'railroad' || space.type === 'utility';
+    const canOwnSpace =
+      space.type === 'property' ||
+      space.type === 'railroad' ||
+      space.type === 'utility';
+
     if (!canOwnSpace || space.price <= 0) {
       socket.emit('error', 'This space cannot be purchased');
       return;
     }
-    
+
     if (space.owner !== null) {
       socket.emit('error', 'Property already owned');
       return;
@@ -667,6 +847,8 @@ io.on('connection', (socket) => {
     space.owner = currentPlayer.id;
     currentPlayer.properties.push(space.id);
 
+    const keepTurnForDoubles = !!gameState.pendingExtraTurn;
+
     gameState.gamePhase = 'waiting';
     io.emit('propertyBought', {
       playerId: currentPlayer.id,
@@ -677,20 +859,35 @@ io.on('connection', (socket) => {
 
     broadcastGameState();
 
-    // Move to next player after a delay
     setTimeout(() => {
-      currentPlayer.consecutiveDoubles = 0;
-      currentPlayer.hasPaidJailFine = false;
-      gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
-      gameState.gamePhase = 'rolling';
+      gameState.pendingExtraTurn = false;
+
+      if (keepTurnForDoubles) {
+        // Same player keeps turn after doubles
+        gameState.gamePhase = 'rolling';
+      } else {
+        // Normal turn progression
+        currentPlayer.consecutiveDoubles = 0;
+        currentPlayer.hasPaidJailFine = false;
+        gameState.currentPlayerIndex =
+          (gameState.currentPlayerIndex + 1) % gameState.players.length;
+        gameState.gamePhase = 'rolling';
+      }
+
       broadcastGameState();
     }, 2000);
   });
 
   // Handle skipping property purchase
+  
   socket.on('skipBuy', () => {
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
-    
+
+    if (!currentPlayer) {
+      socket.emit('error', 'No current player');
+      return;
+    }
+
     if (socket.id !== currentPlayer.socketId) {
       socket.emit('error', 'Not your turn');
       return;
@@ -700,17 +897,222 @@ io.on('connection', (socket) => {
       return;
     }
 
+    const keepTurnForDoubles = !!gameState.pendingExtraTurn;
+
     gameState.gamePhase = 'waiting';
     broadcastGameState();
 
-    // Move to next player
     setTimeout(() => {
-      currentPlayer.consecutiveDoubles = 0;
-      currentPlayer.hasPaidJailFine = false;
-      gameState.currentPlayerIndex = (gameState.currentPlayerIndex + 1) % gameState.players.length;
-      gameState.gamePhase = 'rolling';
+      gameState.pendingExtraTurn = false;
+
+      if (keepTurnForDoubles) {
+        // Same player keeps turn after doubles
+        gameState.gamePhase = 'rolling';
+      } else {
+        currentPlayer.consecutiveDoubles = 0;
+        currentPlayer.hasPaidJailFine = false;
+        gameState.currentPlayerIndex =
+          (gameState.currentPlayerIndex + 1) % gameState.players.length;
+        gameState.gamePhase = 'rolling';
+      }
+
       broadcastGameState();
     }, 1000);
+  });
+``
+
+  // Handle buying a house or hotel
+  socket.on('buyBuilding', ({ propertyId }) => {
+    const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+
+    if (!currentPlayer) {
+      socket.emit('error', 'No current player.');
+      return;
+    }
+
+    if (socket.id !== currentPlayer.socketId) {
+      socket.emit('error', 'Not your turn');
+      return;
+    }
+
+    // Allow building during turn and during property-buy prompt
+    if (!['rolling', 'buying'].includes(gameState.gamePhase)) {
+      socket.emit('error', 'You cannot build right now');
+      return;
+    }
+
+    const numericPropertyId = Number(propertyId);
+    const validation = canBuildOnProperty(gameState, currentPlayer, numericPropertyId);
+
+    if (!validation.ok) {
+      socket.emit('error', validation.reason);
+      return;
+    }
+
+    const property = gameState.board[numericPropertyId];
+    currentPlayer.money -= validation.cost;
+
+    const buildingType = buildOnProperty(property);
+
+    io.emit('buildingBought', {
+      playerId: currentPlayer.id,
+      playerName: currentPlayer.name,
+      propertyId: property.id,
+      propertyName: property.name,
+      cost: validation.cost,
+      buildingType,
+      houses: property.houses || 0,
+      hotel: !!property.hotel
+    });
+
+    broadcastGameState();
+  });
+
+  // Handle trade proposals
+  socket.on('proposeTrade', (trade) => {
+    // trade: { toPlayerId, offer: { money, properties }, request: { money, properties } }
+    const proposer = gameState.players.find(p => p.socketId === socket.id);
+    if (!proposer) {
+      socket.emit('tradeError', 'You must be in the game to propose trades');
+      return;
+    }
+
+    const target = gameState.players.find(p => p.id === trade.toPlayerId);
+    if (!target) {
+      socket.emit('tradeError', 'Target player not found');
+      return;
+    }
+
+    const tradeId = `t_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+    const pending = {
+      id: tradeId,
+      fromId: proposer.id,
+      toId: target.id,
+      offer: {
+        money: Number(trade.offer?.money) || 0,
+        properties: Array.isArray(trade.offer?.properties) ? trade.offer.properties.map(Number) : []
+      },
+      request: {
+        money: Number(trade.request?.money) || 0,
+        properties: Array.isArray(trade.request?.properties) ? trade.request.properties.map(Number) : []
+      },
+      timestamp: Date.now()
+    };
+
+    gameState.pendingTrades = gameState.pendingTrades || [];
+    gameState.pendingTrades.push(pending);
+
+    // Notify the target player of the proposal
+    if (target.socketId) {
+      io.to(target.socketId).emit('tradeProposed', {
+        trade: pending,
+        from: { id: proposer.id, name: proposer.name }
+      });
+    }
+
+    // Acknowledge proposer
+    socket.emit('tradeProposalSent', { tradeId });
+    broadcastGameState();
+  });
+
+  // Handle responses to trades (accept or decline)
+  socket.on('respondTrade', ({ tradeId, accept, respondAsId }) => {
+    // If respondAsId provided (for local testing), use that; otherwise use socket connection
+    const responder = respondAsId 
+      ? gameState.players.find(p => p.id === respondAsId)
+      : gameState.players.find(p => p.socketId === socket.id);
+    
+    if (!responder) {
+      socket.emit('tradeError', 'Player not found');
+      return;
+    }
+
+    gameState.pendingTrades = gameState.pendingTrades || [];
+    const idx = gameState.pendingTrades.findIndex(t => t.id === tradeId);
+    if (idx === -1) {
+      socket.emit('tradeError', 'Trade not found or already handled');
+      return;
+    }
+
+    const pending = gameState.pendingTrades[idx];
+    const proposer = gameState.players.find(p => p.id === pending.fromId);
+    const target = gameState.players.find(p => p.id === pending.toId);
+
+    // Only the intended recipient may respond
+    if (responder.id !== pending.toId) {
+      socket.emit('tradeError', 'Only the target player can respond to this trade');
+      return;
+    }
+
+    // Remove pending trade regardless of outcome
+    gameState.pendingTrades.splice(idx, 1);
+
+    if (!accept) {
+      // Notify both parties
+      if (proposer?.socketId) io.to(proposer.socketId).emit('tradeDeclined', { tradeId, by: responder.id });
+      if (target?.socketId) io.to(target.socketId).emit('tradeDeclined', { tradeId, by: responder.id });
+      broadcastGameState();
+      return;
+    }
+
+    // Validate that properties and funds are still available
+    const offerProps = pending.offer.properties || [];
+    const requestProps = pending.request.properties || [];
+
+    // Check ownership
+    const proposerStillOwns = offerProps.every(pid => proposer.properties.includes(pid));
+    const targetStillOwns = requestProps.every(pid => target.properties.includes(pid));
+
+    if (!proposerStillOwns || !targetStillOwns) {
+      const msg = 'One or more properties are no longer owned by the proposing players';
+      if (proposer?.socketId) io.to(proposer.socketId).emit('tradeError', msg);
+      if (target?.socketId) io.to(target.socketId).emit('tradeError', msg);
+      broadcastGameState();
+      return;
+    }
+
+    // Check funds
+    if (proposer.money < pending.offer.money || target.money < pending.request.money) {
+      const msg = 'One or both players lack sufficient funds for the proposed cash exchange';
+      if (proposer?.socketId) io.to(proposer.socketId).emit('tradeError', msg);
+      if (target?.socketId) io.to(target.socketId).emit('tradeError', msg);
+      broadcastGameState();
+      return;
+    }
+
+    // Execute property transfers
+    offerProps.forEach(pid => {
+      // remove from proposer
+      proposer.properties = proposer.properties.filter(id => id !== pid);
+      // assign to target
+      target.properties.push(pid);
+      const space = gameState.board[Number(pid)];
+      if (space) space.owner = target.id;
+    });
+
+    requestProps.forEach(pid => {
+      target.properties = target.properties.filter(id => id !== pid);
+      proposer.properties.push(pid);
+      const space = gameState.board[Number(pid)];
+      if (space) space.owner = proposer.id;
+    });
+
+    // Execute money transfers (offer.money goes from proposer -> target, request.money goes from target -> proposer)
+    const offerMoney = Number(pending.offer.money) || 0;
+    const requestMoney = Number(pending.request.money) || 0;
+
+    proposer.money -= offerMoney;
+    target.money += offerMoney;
+
+    target.money -= requestMoney;
+    proposer.money += requestMoney;
+
+    // Notify participants and broadcast new game state
+    if (proposer?.socketId) io.to(proposer.socketId).emit('tradeExecuted', { tradeId, with: target.id, details: pending });
+    if (target?.socketId) io.to(target.socketId).emit('tradeExecuted', { tradeId, with: proposer.id, details: pending });
+
+    io.emit('tradeNotification', { message: `${proposer.name} and ${target.name} completed a trade.` });
+    broadcastGameState();
   });
 
   // Handle player disconnect
@@ -723,8 +1125,10 @@ io.on('connection', (socket) => {
       gameState.gameStarted = false;
       gameState.currentPlayerIndex = 0;
       gameState.gamePhase = 'waiting';
+      gameState.pendingExtraTurn = false;
       // Reset board ownership
-      gameState.board = BOARD_SPACES.map(space => ({ ...space }));
+      gameState.board = createBoardState();
+      delete gameState.pendingRent;
     } else {
       // Adjust current player index if needed
       if (gameState.currentPlayerIndex >= gameState.players.length) {

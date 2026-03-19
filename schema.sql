@@ -1,0 +1,27 @@
+CREATE TABLE games (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  room_code VARCHAR(50) UNIQUE NOT NULL,
+  current_player_index INT DEFAULT 0,
+  game_started BOOLEAN DEFAULT FALSE,
+  game_phase VARCHAR(50),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE players (
+  id VARCHAR(100) PRIMARY KEY,
+  game_id INT,
+  name VARCHAR(50),
+  money INT,
+  position INT,
+  color VARCHAR(20),
+  in_jail BOOLEAN,
+  FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
+);
+
+CREATE TABLE properties (
+  id INT PRIMARY KEY,
+  game_id INT,
+  owner_id VARCHAR(100),
+  FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
+);
