@@ -47,6 +47,7 @@
                     <button id="useJailCardBtn" class="action-btn secondary" style="display: none;">Use Get Out of Jail Free</button>
                     <button id="buyPropertyBtn" class="action-btn" class="action-btn" style="display: none;">Buy Property</button>
                     <button id="skipBuyBtn" class="action-btn secondary" style="display: none;">Skip</button>
+                    <button id="proposeTradeBtn" class="action-btn" style="display: inline-block;">Propose Trade</button>
                     <div id="gameMessage" class="game-message"></div>
                     <div id="buildingControls"> </div>
                 </div>
@@ -55,6 +56,75 @@
             <!-- Game Board -->
             <div class="board-container">
                 <div id="gameBoard" class="game-board"></div>
+            </div>
+        </div>
+
+        <!-- Trade Modal -->
+        <div id="tradeModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Propose a Trade</h3>
+                    <button id="tradeModalClose" class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label>Trade With:</label>
+                        <select id="tradeTarget">
+                            <option value="">Select a player</option>
+                        </select>
+                    </div>
+                    
+                    <div class="trade-columns">
+                        <div class="trade-column">
+                            <h4>You Offer</h4>
+                            <div class="form-group">
+                                <label>Money:</label>
+                                <input type="number" id="offerMoney" min="0" value="0" placeholder="0">
+                            </div>
+                            <div class="form-group">
+                                <label>Properties (select):</label>
+                                <div id="offerProperties" class="property-list"></div>
+                            </div>
+                        </div>
+                        <div class="trade-column">
+                            <h4>You Request</h4>
+                            <div class="form-group">
+                                <label>Money:</label>
+                                <input type="number" id="requestMoney" min="0" value="0" placeholder="0">
+                            </div>
+                            <div class="form-group">
+                                <label>Properties (select):</label>
+                                <div id="requestProperties" class="property-list"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="tradeSubmitBtn" class="action-btn">Send Proposal</button>
+                    <button id="tradeCancelBtn" class="action-btn secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Incoming Trade Proposal Modal -->
+        <div id="tradeResponseModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Trade Proposal</h3>
+                </div>
+                <div class="modal-body">
+                    <div id="tradeProposalContent" style="font-size: 16px; line-height: 1.6;"></div>
+                    <div class="form-group" style="margin-top: 20px;">
+                        <label>Respond as (local testing only):</label>
+                        <select id="respondAsPlayer">
+                            <option value="">Select player</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="tradeAcceptBtn" class="action-btn">Accept</button>
+                    <button id="tradeRejectBtn" class="action-btn secondary">Decline</button>
+                </div>
             </div>
         </div>
 
