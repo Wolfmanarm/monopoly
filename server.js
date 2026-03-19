@@ -244,7 +244,8 @@ function calculateRent(space, owner) {
     const railroadCount = gameState.board.filter(s =>
       s.type === 'railroad' && s.owner === owner.id
     ).length;
-    return space.rent * railroadCount;
+    if (railroadCount <= 0) return 0;
+    return space.rent * Math.pow(2, railroadCount - 1);
   }
 
   if (space.type === 'utility') {
