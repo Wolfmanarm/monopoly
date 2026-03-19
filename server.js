@@ -1145,3 +1145,65 @@ httpServer.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
 
+
+
+const db = await mysql.createConnection({
+  host: 'localhost',
+  user: 'db_user',
+  password: 'password',
+  database: 'monopoly'
+});
+
+async function saveGame(roomCode) {
+  const [gameRows] = await db.execute( "SELECT id FROM games WHERE room_code = ?", [roomCode]);
+
+  let gameId;
+
+  if (gameRows.length === 0) 
+  {
+    const [result] = await db.execute(
+      "INSERT INTO games (room_code, current_player_index, game_started, game_phase) VALUES (?, ?, ?, ?)",
+      [roomCode, gameState.currentPlayerIndex, gameState.gameStarted, gameState.gamePhase]);
+    gameId = result.insertId;
+  } 
+  else 
+  {
+    gameId = gameRows[0].id;
+    await db.execute("UPDATE games SET current_player_index=?, game_started=?, game_phase=? WHERE id=?",
+    [gameState.currentPlayerIndex, gameState.gameStarted, gameState.gamePhase, gameId] );
+  }
+
+  await db.execute("DELETE FROM players WHERE game_id=?", [gameId]);
+
+  for (const player of gameState.players) 
+  {
+  await db.execute(
+  "INSERT INTO players (id, game_id, name, money, position, color, in_jail) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  [player.id, gameId, player.name, player.money, player.position, player.color, player.inJail]);
+  }
+
+  console.log("Game saved to MySQL");
+}
+
+
+async function loadGame(roomCode) 
+{
+  const [gameRows] = await db.execute(
+    "SELECT * FROM games WHERE room_code=?",[roomCode]);
+
+  if (gameRows.length === 0) return false;
+
+  const game = gameRows[0];
+
+  const [players] = await db.execute(
+    "SELECT * FROM players WHERE game_id=?",[game.id]);
+
+  gameState.players = players;
+  gameState.currentPlayerIndex = game.current_player_index;
+  gameState.gameStarted = game.game_started;
+  gameState.gamePhase = game.game_phase;
+
+  console.log("Game loaded from MySQL");
+  return true;
+}
+
