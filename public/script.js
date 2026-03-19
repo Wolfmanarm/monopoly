@@ -31,6 +31,20 @@ const diceDisplay = document.getElementById('diceDisplay');
 const buildingControls = document.getElementById('buildingControls');
 const howToPlayToggle = document.getElementById('howToPlayToggle');
 const howToPlayContent = document.getElementById('howToPlayContent');
+const lobbyTutorialBtn = document.getElementById('lobbyTutorialBtn');
+const gameTutorialBtn = document.getElementById('gameTutorialBtn');
+const tutorialOverlay = document.getElementById('tutorialOverlay');
+const tutorialCard = document.getElementById('tutorialCard');
+const tutorialStepCounter = document.getElementById('tutorialStepCounter');
+const tutorialTitle = document.getElementById('tutorialTitle');
+const tutorialText = document.getElementById('tutorialText');
+const tutorialPrevBtn = document.getElementById('tutorialPrevBtn');
+const tutorialNextBtn = document.getElementById('tutorialNextBtn');
+const tutorialCloseBtn = document.getElementById('tutorialCloseBtn');
+
+let tutorialSteps = [];
+let tutorialIndex = 0;
+let tutorialActive = false;
 
 // Join game
 joinBtn.addEventListener('click', () => {
@@ -231,6 +245,10 @@ function updateUI() {
         gameStatus.style.color = currentPlayer.color;
         controlsTurnStatus.textContent = `${currentPlayer.name}'s Turn`;
         controlsTurnStatus.style.color = currentPlayer.color;
+    }
+
+    if (tutorialActive) {
+        renderTutorialStep();
     }
 }
 
@@ -621,5 +639,199 @@ function renderBuildingMarkers(space) {
             ${Array.from({ length: houses }).map(() => `<span class="house-marker">🏠</span>`).join('')}
         </div>
     `;
+}
+
+function getTutorialSteps() {
+    const baseSteps = [
+        {
+            selector: '#playerName',
+            title: 'Join the Game',
+            text: 'Type your name and click Join Game. You need at least 2 players to start.'
+        },
+        {
+            selector: '#startBtn',
+            title: 'Start Match',
+            text: 'Once 2+ players have joined, click Start Game to begin.'
+        },
+        {
+            selector: '#playersList',
+            title: 'Track Players',
+            text: 'This panel shows money, turn order, and property count for everyone.'
+        },
+        {
+            selector: '#rollDiceBtn',
+            title: 'Take Your Turn',
+            text: 'On your turn, use this button to roll. During rent, this changes to Pay Rent.'
+        },
+        {
+            selector: '#gameBoard',
+            title: 'Read the Board',
+            text: 'Token positions, ownership bars, and buildings are shown directly on board spaces.'
+        },
+        {
+            selector: '#gameMessage',
+            title: 'Watch Events',
+            text: 'Important outcomes (rent, taxes, cards, jail) are described here each turn.'
+        },
+        {
+            selector: '#howToPlayToggle',
+            title: 'Quick Rules',
+            text: 'Use How to Play anytime for a compact rules reference.'
+        }
+    ];
+
+    return baseSteps;
+}
+
+function clearTutorialFocus() {
+    document.querySelectorAll('.tutorial-focus').forEach(el => el.classList.remove('tutorial-focus'));
+}
+
+function findStepElement(selector) {
+    const element = document.querySelector(selector);
+    if (!element) return null;
+
+    const style = window.getComputedStyle(element);
+    if (style.display === 'none' || style.visibility === 'hidden') return null;
+
+    const rect = element.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
+
+    return element;
+}
+
+function positionTutorialCard(target) {
+    const rect = target.getBoundingClientRect();
+    const cardRect = tutorialCard.getBoundingClientRect();
+    const margin = 12;
+
+    let left = rect.right + margin;
+    if (left + cardRect.width > window.innerWidth - margin) {
+        left = rect.left - cardRect.width - margin;
+    }
+    if (left < margin) left = margin;
+
+    let top = rect.top;
+    if (top + cardRect.height > window.innerHeight - margin) {
+        top = window.innerHeight - cardRect.height - margin;
+    }
+    if (top < margin) top = margin;
+
+    tutorialCard.style.left = `${left}px`;
+    tutorialCard.style.top = `${top}px`;
+}
+
+function moveTutorial(direction) {
+    if (!tutorialActive || tutorialSteps.length === 0) return;
+
+    tutorialIndex += direction;
+    if (tutorialIndex < 0) tutorialIndex = 0;
+    if (tutorialIndex >= tutorialSteps.length) {
+        closeTutorial();
+        return;
+    }
+
+    renderTutorialStep();
+}
+
+function renderTutorialStep() {
+    if (!tutorialActive || tutorialSteps.length === 0) return;
+
+    let step = tutorialSteps[tutorialIndex];
+    let target = findStepElement(step.selector);
+
+    let safety = 0;
+    while (!target && tutorialIndex < tutorialSteps.length - 1 && safety < tutorialSteps.length) {
+        tutorialIndex += 1;
+        step = tutorialSteps[tutorialIndex];
+        target = findStepElement(step.selector);
+        safety += 1;
+    }
+
+    if (!target) {
+        closeTutorial();
+        return;
+    }
+
+    clearTutorialFocus();
+    target.classList.add('tutorial-focus');
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    tutorialStepCounter.textContent = `Step ${tutorialIndex + 1} of ${tutorialSteps.length}`;
+    tutorialTitle.textContent = step.title;
+    tutorialText.textContent = step.text;
+    tutorialPrevBtn.disabled = tutorialIndex === 0;
+    tutorialNextBtn.textContent = tutorialIndex === tutorialSteps.length - 1 ? 'Finish' : 'Next';
+
+    requestAnimationFrame(() => positionTutorialCard(target));
+}
+
+function startTutorial() {
+    tutorialSteps = getTutorialSteps();
+    if (!tutorialSteps.length) return;
+
+    tutorialActive = true;
+    tutorialIndex = 0;
+    tutorialOverlay.style.display = 'block';
+    renderTutorialStep();
+}
+
+function closeTutorial() {
+    tutorialActive = false;
+    tutorialOverlay.style.display = 'none';
+    clearTutorialFocus();
+    try {
+        localStorage.setItem('monopolyTutorialSeen', '1');
+    } catch (err) {
+        console.warn('Could not persist tutorial state', err);
+    }
+}
+
+if (lobbyTutorialBtn) {
+    lobbyTutorialBtn.addEventListener('click', startTutorial);
+}
+
+if (gameTutorialBtn) {
+    gameTutorialBtn.addEventListener('click', startTutorial);
+}
+
+if (tutorialPrevBtn) {
+    tutorialPrevBtn.addEventListener('click', () => moveTutorial(-1));
+}
+
+if (tutorialNextBtn) {
+    tutorialNextBtn.addEventListener('click', () => moveTutorial(1));
+}
+
+if (tutorialCloseBtn) {
+    tutorialCloseBtn.addEventListener('click', closeTutorial);
+}
+
+window.addEventListener('resize', () => {
+    if (tutorialActive) renderTutorialStep();
+});
+
+window.addEventListener('scroll', () => {
+    if (tutorialActive) renderTutorialStep();
+}, true);
+
+window.addEventListener('keydown', (event) => {
+    if (!tutorialActive) return;
+    if (event.key === 'Escape') closeTutorial();
+    if (event.key === 'ArrowRight') moveTutorial(1);
+    if (event.key === 'ArrowLeft') moveTutorial(-1);
+});
+
+try {
+    const seenTutorial = localStorage.getItem('monopolyTutorialSeen');
+    if (!seenTutorial) {
+        setTimeout(() => {
+            if (!tutorialActive) {
+                startTutorial();
+            }
+        }, 700);
+    }
+} catch (err) {
+    console.warn('Could not read tutorial state', err);
 }
 

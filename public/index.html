@@ -19,6 +19,7 @@
             <div id="lobbyStatus" class="status-message"></div>
             <div id="playerList" class="player-list"></div>
             <button id="startBtn" class="start-btn" style="display: none;">Start Game</button>
+            <button id="lobbyTutorialBtn" class="start-btn" style="margin-top: 10px;">Start Tutorial</button>
         </div>
     </div>
 
@@ -62,6 +63,9 @@
             <button id="howToPlayToggle" class="action-btn secondary how-to-play-button">
                 How to Play
             </button>
+            <button id="gameTutorialBtn" class="action-btn secondary how-to-play-button" style="margin-top: 10px;">
+                Guided Tutorial
+            </button>
             <div id="howToPlayContent" class="how-to-play-content" style="display: none;">
                 <h3>How to Play Monopoly</h3>
                 <ul>
@@ -74,6 +78,19 @@
                     <li>Pass GO to collect $200 from the bank.</li>
                     <li>The goal is to be the last player remaining who is not bankrupt.</li>
                 </ul>
+            </div>
+        </div>
+    </div>
+
+    <div id="tutorialOverlay" class="tutorial-overlay" style="display: none;">
+        <div id="tutorialCard" class="tutorial-card" role="dialog" aria-modal="true" aria-label="Game tutorial">
+            <div class="tutorial-step" id="tutorialStepCounter">Step 1</div>
+            <h3 id="tutorialTitle">Welcome</h3>
+            <p id="tutorialText"></p>
+            <div class="tutorial-actions">
+                <button id="tutorialPrevBtn" class="action-btn secondary">Previous</button>
+                <button id="tutorialNextBtn" class="action-btn">Next</button>
+                <button id="tutorialCloseBtn" class="action-btn secondary">Close</button>
             </div>
         </div>
     </div>
