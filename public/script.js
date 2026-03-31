@@ -128,6 +128,8 @@ function setLoggedOut() {
     if (saveGameBtn) saveGameBtn.style.display = 'none';
     if (gameLogoutBtn) gameLogoutBtn.style.display = 'none';
     if (savedGamesList) savedGamesList.innerHTML = '';
+    lobbyScreen.style.display = 'block';
+    gameScreen.style.display = 'none';
 }
 
 // Check if already logged in on page load
