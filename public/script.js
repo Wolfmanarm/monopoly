@@ -4,6 +4,7 @@ const socket = io();
 let gameState = null;
 let currentPlayerId = null;
 let currentUser = null; // { id, username } when logged in, null otherwise
+let hasLoggedOut = false; // true after explicit logout, prevents game screen from reappearing
 
 // Track connection id when connected
 socket.on('connect', () => {
@@ -112,6 +113,7 @@ function showAuthMessage(msg, isError) {
 }
 
 function setLoggedIn(user) {
+    hasLoggedOut = false;
     currentUser = user;
     authForms.style.display = 'none';
     loggedInSection.style.display = 'block';
@@ -122,6 +124,7 @@ function setLoggedIn(user) {
 }
 
 function setLoggedOut() {
+    hasLoggedOut = true;
     currentUser = null;
     authForms.style.display = 'block';
     loggedInSection.style.display = 'none';
@@ -405,6 +408,13 @@ window.addEventListener('unhandledrejection', (e) => {
 function updateUI() {
     if (!gameState) return;
 
+    // If the user has explicitly logged out, keep them on the lobby/login screen
+    if (hasLoggedOut) {
+        lobbyScreen.style.display = 'block';
+        gameScreen.style.display = 'none';
+        return;
+    }
+
     // Update lobby
     if (!gameState.gameStarted) {
         updateLobby();
@@ -450,11 +460,19 @@ function updateLobby() {
         const playerDiv = document.createElement('div');
         playerDiv.className = 'lobby-player';
         playerDiv.style.borderLeft = `4px solid ${player.color}`;
+        const isMe = player.socketId === socket.id;
         playerDiv.innerHTML = `
             <span class="player-name" title="${propertyTooltip}">${player.name}</span>
             <span class="player-money">$${player.money}</span>
+            ${isMe ? `<button class="remove-player-btn" data-id="${player.id}">Leave</button>` : ''}
         `;
         playerList.appendChild(playerDiv);
+    });
+
+    playerList.querySelectorAll('.remove-player-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            socket.emit('removePlayer', btn.dataset.id);
+        });
     });
 
     // Show start button if 2+ players and not started

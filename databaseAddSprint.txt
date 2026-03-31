@@ -1,3 +1,0 @@
-1: Connect app to an sql database for saving games.
-2: add a "save game" button on bottom of game page that allows players to save the game at that point to the database. only works if they are logged in.
-3: add a "log in" feature to the first page that allows players to log into an account and therefore access saved games.

@@ -1,0 +1,3 @@
+1: add feature to remove players from a game before starting.
+2: cannot roll the dice to continue a game when a game has been loaded back in from a saved game.
+3: after logging out, i am logged out but i am returned to the game board. return the player to the login page when logged out.

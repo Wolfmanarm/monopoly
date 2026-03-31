@@ -234,8 +234,11 @@ app.post('/api/load-game', async (req, res) => {
     const savedState = JSON.parse(save.game_data);
     // Clear socket IDs so players can rejoin by name
     savedState.players.forEach(p => { p.socketId = null; });
-    savedState.gameStarted = false;
-    savedState.gamePhase = 'waiting';
+    // Keep gameStarted = true so the game resumes; reset phase to rolling so
+    // players can roll once they reconnect. Clear any pending mid-turn state.
+    savedState.gameStarted = true;
+    savedState.gamePhase = 'rolling';
+    delete savedState.pendingRent;
     Object.assign(gameState, savedState);
     broadcastGameState();
     res.json({ ok: true, name: save.name });
@@ -393,17 +396,18 @@ io.on('connection', (socket) => {
 
   // Handle player joining
   socket.on('joinGame', (playerName) => {
-    if (gameState.gameStarted) {
-      socket.emit('error', 'Game has already started');
-      return;
-    }
-
     // If a loaded save has a player with this name waiting to reconnect, restore them
+    // (must be checked before the gameStarted guard so reconnection works after loading)
     const savedPlayer = gameState.players.find(p => p.name === playerName && !p.socketId);
     if (savedPlayer) {
       savedPlayer.socketId = socket.id;
       console.log(`${playerName} reconnected to loaded save`);
       broadcastGameState();
+      return;
+    }
+
+    if (gameState.gameStarted) {
+      socket.emit('error', 'Game has already started');
       return;
     }
 
@@ -881,6 +885,13 @@ io.on('connection', (socket) => {
       gameState.gamePhase = 'rolling';
       broadcastGameState();
     }, 1000);
+  });
+
+  // Handle removing a player from the lobby before the game starts
+  socket.on('removePlayer', (playerId) => {
+    if (gameState.gameStarted) return;
+    gameState.players = gameState.players.filter(p => p.id !== playerId);
+    broadcastGameState();
   });
 
   // Handle player disconnect
