@@ -33,6 +33,7 @@ const diceDisplay = document.getElementById('diceDisplay');
 const howToPlayToggle = document.getElementById('howToPlayToggle');
 const howToPlayContent = document.getElementById('howToPlayContent');
 const saveGameBtn = document.getElementById('saveGameBtn');
+const gameLogoutBtn = document.getElementById('gameLogoutBtn');
 const saveGameMessage = document.getElementById('saveGameMessage');
 
 // Join game
@@ -116,6 +117,7 @@ function setLoggedIn(user) {
     loggedInSection.style.display = 'block';
     loggedInName.textContent = user.username;
     if (saveGameBtn) saveGameBtn.style.display = 'block';
+    if (gameLogoutBtn) gameLogoutBtn.style.display = 'block';
     loadSavedGames();
 }
 
@@ -124,6 +126,7 @@ function setLoggedOut() {
     authForms.style.display = 'block';
     loggedInSection.style.display = 'none';
     if (saveGameBtn) saveGameBtn.style.display = 'none';
+    if (gameLogoutBtn) gameLogoutBtn.style.display = 'none';
     if (savedGamesList) savedGamesList.innerHTML = '';
 }
 
@@ -193,6 +196,14 @@ document.getElementById('logoutBtn').addEventListener('click', async () => {
     await fetch('/api/logout', { method: 'POST' });
     setLoggedOut();
 });
+
+// Game screen logout button
+if (gameLogoutBtn) {
+    gameLogoutBtn.addEventListener('click', async () => {
+        await fetch('/api/logout', { method: 'POST' });
+        setLoggedOut();
+    });
+}
 
 // Refresh saves button
 document.getElementById('refreshSavesBtn').addEventListener('click', loadSavedGames);
@@ -402,8 +413,9 @@ function updateUI() {
     lobbyScreen.style.display = 'none';
     gameScreen.style.display = 'block';
 
-    // Show save button only if logged in
+    // Show save/logout buttons only if logged in
     if (saveGameBtn) saveGameBtn.style.display = currentUser ? 'block' : 'none';
+    if (gameLogoutBtn) gameLogoutBtn.style.display = currentUser ? 'block' : 'none';
 
     // Update board
     renderBoard();
