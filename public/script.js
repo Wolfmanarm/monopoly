@@ -408,13 +408,6 @@ window.addEventListener('unhandledrejection', (e) => {
 function updateUI() {
     if (!gameState) return;
 
-    // If the user has explicitly logged out, keep them on the lobby/login screen
-    if (hasLoggedOut) {
-        lobbyScreen.style.display = 'block';
-        gameScreen.style.display = 'none';
-        return;
-    }
-
     // Update lobby
     if (!gameState.gameStarted) {
         updateLobby();
