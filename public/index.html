@@ -12,6 +12,45 @@
     <div id="lobby" class="screen">
         <div class="lobby-container">
             <h1>🎲 Monopoly Multiplayer</h1>
+
+            <!-- Auth Section -->
+            <div class="auth-section">
+                <!-- Shown when NOT logged in -->
+                <div id="authForms">
+                    <div class="auth-tabs">
+                        <button id="showLoginTab" class="auth-tab auth-tab-active">Log In</button>
+                        <button id="showRegisterTab" class="auth-tab">Register</button>
+                    </div>
+                    <div id="loginTab" class="auth-form">
+                        <input type="text" id="loginUsername" placeholder="Username" maxlength="20">
+                        <input type="password" id="loginPassword" placeholder="Password">
+                        <button id="loginBtn" class="auth-btn">Log In</button>
+                    </div>
+                    <div id="registerTab" class="auth-form" style="display:none;">
+                        <input type="text" id="regUsername" placeholder="Username (3–20 chars)" maxlength="20">
+                        <input type="password" id="regPassword" placeholder="Password (min 4 chars)">
+                        <button id="registerBtn" class="auth-btn">Register</button>
+                    </div>
+                    <div id="authMessage" class="auth-message"></div>
+                </div>
+                <!-- Shown when logged in -->
+                <div id="loggedInSection" style="display:none;">
+                    <div class="logged-in-bar">
+                        <span>Logged in as <strong id="loggedInName"></strong></span>
+                        <button id="logoutBtn" class="auth-btn-small">Log Out</button>
+                    </div>
+                    <div id="savedGamesSection">
+                        <div class="saved-games-header">
+                            <span>Saved Games</span>
+                            <button id="refreshSavesBtn" class="auth-btn-small">Refresh</button>
+                        </div>
+                        <div id="savedGamesList" class="saved-games-list"></div>
+                    </div>
+                </div>
+            </div>
+
+            <hr class="lobby-divider">
+
             <div class="lobby-form">
                 <input type="text" id="playerName" placeholder="Enter your name" maxlength="20">
                 <button id="joinBtn">Join Game</button>
@@ -74,6 +113,12 @@
                     <li>The goal is to be the last player remaining who is not bankrupt.</li>
                 </ul>
             </div>
+        </div>
+
+        <!-- Save Game Bar -->
+        <div class="save-game-bar">
+            <button id="saveGameBtn" class="action-btn save-game-btn" style="display:none;">Save Game</button>
+            <div id="saveGameMessage" class="save-game-message"></div>
         </div>
     </div>
 

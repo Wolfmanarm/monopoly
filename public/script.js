@@ -3,6 +3,8 @@ const socket = io();
 
 let gameState = null;
 let currentPlayerId = null;
+let currentUser = null; // { id, username } when logged in, null otherwise
+
 // Track connection id when connected
 socket.on('connect', () => {
     currentPlayerId = socket.id;
@@ -30,6 +32,8 @@ const controlsTurnStatus = document.getElementById('controlsTurnStatus');
 const diceDisplay = document.getElementById('diceDisplay');
 const howToPlayToggle = document.getElementById('howToPlayToggle');
 const howToPlayContent = document.getElementById('howToPlayContent');
+const saveGameBtn = document.getElementById('saveGameBtn');
+const saveGameMessage = document.getElementById('saveGameMessage');
 
 // Join game
 joinBtn.addEventListener('click', () => {
@@ -88,6 +92,199 @@ payJailFineBtn.addEventListener('click', () => {
 useJailCardBtn.addEventListener('click', () => {
     socket.emit('useGetOutOfJailCard');
 });
+
+// ── Auth UI ──────────────────────────────────────────────────────────────────
+
+const authForms = document.getElementById('authForms');
+const loggedInSection = document.getElementById('loggedInSection');
+const loggedInName = document.getElementById('loggedInName');
+const loginTab = document.getElementById('loginTab');
+const registerTab = document.getElementById('registerTab');
+const showLoginTab = document.getElementById('showLoginTab');
+const showRegisterTab = document.getElementById('showRegisterTab');
+const authMessage = document.getElementById('authMessage');
+const savedGamesList = document.getElementById('savedGamesList');
+
+function showAuthMessage(msg, isError) {
+    authMessage.textContent = msg;
+    authMessage.style.color = isError ? '#c0392b' : '#27ae60';
+}
+
+function setLoggedIn(user) {
+    currentUser = user;
+    authForms.style.display = 'none';
+    loggedInSection.style.display = 'block';
+    loggedInName.textContent = user.username;
+    if (saveGameBtn) saveGameBtn.style.display = 'block';
+    loadSavedGames();
+}
+
+function setLoggedOut() {
+    currentUser = null;
+    authForms.style.display = 'block';
+    loggedInSection.style.display = 'none';
+    if (saveGameBtn) saveGameBtn.style.display = 'none';
+    if (savedGamesList) savedGamesList.innerHTML = '';
+}
+
+// Check if already logged in on page load
+fetch('/api/me')
+    .then(r => r.ok ? r.json() : null)
+    .then(user => { if (user) setLoggedIn(user); })
+    .catch(() => {});
+
+// Tab switching
+showLoginTab.addEventListener('click', () => {
+    loginTab.style.display = 'block';
+    registerTab.style.display = 'none';
+    showLoginTab.classList.add('auth-tab-active');
+    showRegisterTab.classList.remove('auth-tab-active');
+    authMessage.textContent = '';
+});
+
+showRegisterTab.addEventListener('click', () => {
+    loginTab.style.display = 'none';
+    registerTab.style.display = 'block';
+    showRegisterTab.classList.add('auth-tab-active');
+    showLoginTab.classList.remove('auth-tab-active');
+    authMessage.textContent = '';
+});
+
+// Login
+document.getElementById('loginBtn').addEventListener('click', async () => {
+    const username = document.getElementById('loginUsername').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    if (!username || !password) { showAuthMessage('Enter username and password', true); return; }
+    try {
+        const res = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (!res.ok) { showAuthMessage(data.error, true); return; }
+        setLoggedIn(data);
+        document.getElementById('loginUsername').value = '';
+        document.getElementById('loginPassword').value = '';
+    } catch { showAuthMessage('Login failed', true); }
+});
+
+// Register
+document.getElementById('registerBtn').addEventListener('click', async () => {
+    const username = document.getElementById('regUsername').value.trim();
+    const password = document.getElementById('regPassword').value;
+    if (!username || !password) { showAuthMessage('Enter username and password', true); return; }
+    try {
+        const res = await fetch('/api/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (!res.ok) { showAuthMessage(data.error, true); return; }
+        setLoggedIn(data);
+        document.getElementById('regUsername').value = '';
+        document.getElementById('regPassword').value = '';
+    } catch { showAuthMessage('Registration failed', true); }
+});
+
+// Logout
+document.getElementById('logoutBtn').addEventListener('click', async () => {
+    await fetch('/api/logout', { method: 'POST' });
+    setLoggedOut();
+});
+
+// Refresh saves button
+document.getElementById('refreshSavesBtn').addEventListener('click', loadSavedGames);
+
+async function loadSavedGames() {
+    if (!currentUser) return;
+    try {
+        const res = await fetch('/api/saved-games');
+        if (!res.ok) return;
+        const saves = await res.json();
+        savedGamesList.innerHTML = '';
+        if (saves.length === 0) {
+            savedGamesList.innerHTML = '<div class="no-saves">No saved games yet.</div>';
+            return;
+        }
+        saves.forEach(save => {
+            const date = new Date(save.saved_at).toLocaleString();
+            const item = document.createElement('div');
+            item.className = 'saved-game-item';
+            item.innerHTML = `
+                <span class="save-name">${save.name}</span>
+                <span class="save-date">${date}</span>
+                <div class="save-actions">
+                    <button class="auth-btn-small load-save-btn" data-id="${save.id}" data-name="${save.name}">Load</button>
+                    <button class="auth-btn-small delete-save-btn" data-id="${save.id}">Delete</button>
+                </div>
+            `;
+            savedGamesList.appendChild(item);
+        });
+
+        savedGamesList.querySelectorAll('.load-save-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                if (!confirm(`Load "${btn.dataset.name}"? This will replace the current game for all players.`)) return;
+                try {
+                    const res = await fetch('/api/load-game', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ saveId: Number(btn.dataset.id) })
+                    });
+                    const data = await res.json();
+                    if (!res.ok) { alert(data.error); return; }
+                    alert(`Loaded "${data.name}". Players can now rejoin using their saved names.`);
+                } catch { alert('Failed to load game'); }
+            });
+        });
+
+        savedGamesList.querySelectorAll('.delete-save-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                if (!confirm('Delete this save?')) return;
+                try {
+                    const res = await fetch(`/api/saved-games/${btn.dataset.id}`, { method: 'DELETE' });
+                    if (res.ok) loadSavedGames();
+                } catch { alert('Failed to delete save'); }
+            });
+        });
+    } catch { /* ignore */ }
+}
+
+// ── Save Game ────────────────────────────────────────────────────────────────
+
+if (saveGameBtn) {
+    saveGameBtn.addEventListener('click', async () => {
+        if (!currentUser) {
+            saveGameMessage.textContent = 'You must be logged in to save.';
+            saveGameMessage.style.color = '#c0392b';
+            return;
+        }
+        const name = prompt('Enter a name for this save:');
+        if (!name || !name.trim()) return;
+        try {
+            const res = await fetch('/api/save-game', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name.trim() })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                saveGameMessage.textContent = data.error;
+                saveGameMessage.style.color = '#c0392b';
+                return;
+            }
+            saveGameMessage.textContent = `Game saved as "${data.name}"!`;
+            saveGameMessage.style.color = '#27ae60';
+            setTimeout(() => { saveGameMessage.textContent = ''; }, 3000);
+        } catch {
+            saveGameMessage.textContent = 'Failed to save game.';
+            saveGameMessage.style.color = '#c0392b';
+        }
+    });
+}
+
+// ── Socket event listeners ───────────────────────────────────────────────────
 
 // Socket event listeners
 socket.on('gameState', (state) => {
@@ -204,6 +401,9 @@ function updateUI() {
     // Show game screen
     lobbyScreen.style.display = 'none';
     gameScreen.style.display = 'block';
+
+    // Show save button only if logged in
+    if (saveGameBtn) saveGameBtn.style.display = currentUser ? 'block' : 'none';
 
     // Update board
     renderBoard();

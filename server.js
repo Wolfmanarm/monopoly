@@ -3,6 +3,9 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import session from 'express-session';
+import bcrypt from 'bcryptjs';
+import pool, { initDb } from './database.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -10,6 +13,14 @@ const __dirname = dirname(__filename);
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer);
+
+app.use(express.json());
+app.use(session({
+  secret: 'monopoly-session-secret-key',
+  resave: false,
+  saveUninitialized: false,
+  cookie: { maxAge: 7 * 24 * 60 * 60 * 1000 }
+}));
 
 // Serve static files from public directory
 app.use(express.static(join(__dirname, 'public')));
@@ -100,6 +111,158 @@ const COMMUNITY_CHEST_CARDS = [
 function broadcastGameState() {
   io.emit('gameState', gameState);
 }
+
+// ── Auth & Game Save API Routes ──────────────────────────────────────────────
+
+app.post('/api/register', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username and password required' });
+  }
+  if (username.trim().length < 3 || username.trim().length > 20) {
+    return res.status(400).json({ error: 'Username must be 3-20 characters' });
+  }
+  if (password.length < 4) {
+    return res.status(400).json({ error: 'Password must be at least 4 characters' });
+  }
+  try {
+    const hash = await bcrypt.hash(password, 10);
+    const { rows } = await pool.query(
+      'INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id, username',
+      [username.trim(), hash]
+    );
+    const user = rows[0];
+    req.session.userId = user.id;
+    req.session.username = user.username;
+    res.json({ id: user.id, username: user.username });
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Username already taken' });
+    }
+    console.error('Register error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/login', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username and password required' });
+  }
+  try {
+    const { rows } = await pool.query('SELECT * FROM users WHERE username = $1', [username.trim()]);
+    const user = rows[0];
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid username or password' });
+    }
+    const match = await bcrypt.compare(password, user.password_hash);
+    if (!match) {
+      return res.status(401).json({ error: 'Invalid username or password' });
+    }
+    req.session.userId = user.id;
+    req.session.username = user.username;
+    res.json({ id: user.id, username: user.username });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/logout', (req, res) => {
+  req.session.destroy();
+  res.json({ ok: true });
+});
+
+app.get('/api/me', (req, res) => {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: 'Not logged in' });
+  }
+  res.json({ id: req.session.userId, username: req.session.username });
+});
+
+app.post('/api/save-game', async (req, res) => {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: 'Must be logged in to save' });
+  }
+  const { name } = req.body;
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: 'Save name required' });
+  }
+  try {
+    const gameData = JSON.stringify(gameState);
+    const { rows } = await pool.query(
+      'INSERT INTO saved_games (user_id, name, game_data) VALUES ($1, $2, $3) RETURNING id, name, saved_at',
+      [req.session.userId, name.trim(), gameData]
+    );
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('Save game error:', err);
+    res.status(500).json({ error: 'Failed to save game' });
+  }
+});
+
+app.get('/api/saved-games', async (req, res) => {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: 'Must be logged in' });
+  }
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, name, saved_at FROM saved_games WHERE user_id = $1 ORDER BY saved_at DESC',
+      [req.session.userId]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('Get saves error:', err);
+    res.status(500).json({ error: 'Failed to get saves' });
+  }
+});
+
+app.post('/api/load-game', async (req, res) => {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: 'Must be logged in' });
+  }
+  const { saveId } = req.body;
+  try {
+    const { rows } = await pool.query(
+      'SELECT * FROM saved_games WHERE id = $1 AND user_id = $2',
+      [saveId, req.session.userId]
+    );
+    const save = rows[0];
+    if (!save) {
+      return res.status(404).json({ error: 'Save not found' });
+    }
+    const savedState = JSON.parse(save.game_data);
+    // Clear socket IDs so players can rejoin by name
+    savedState.players.forEach(p => { p.socketId = null; });
+    savedState.gameStarted = false;
+    savedState.gamePhase = 'waiting';
+    Object.assign(gameState, savedState);
+    broadcastGameState();
+    res.json({ ok: true, name: save.name });
+  } catch (err) {
+    console.error('Load game error:', err);
+    res.status(500).json({ error: 'Failed to load game' });
+  }
+});
+
+app.delete('/api/saved-games/:id', async (req, res) => {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: 'Must be logged in' });
+  }
+  try {
+    const result = await pool.query(
+      'DELETE FROM saved_games WHERE id = $1 AND user_id = $2',
+      [Number(req.params.id), req.session.userId]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Save not found' });
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Delete save error:', err);
+    res.status(500).json({ error: 'Failed to delete save' });
+  }
+});
 
 // Calculate rent for a property
 function calculateRent(space, owner) {
@@ -232,6 +395,15 @@ io.on('connection', (socket) => {
   socket.on('joinGame', (playerName) => {
     if (gameState.gameStarted) {
       socket.emit('error', 'Game has already started');
+      return;
+    }
+
+    // If a loaded save has a player with this name waiting to reconnect, restore them
+    const savedPlayer = gameState.players.find(p => p.name === playerName && !p.socketId);
+    if (savedPlayer) {
+      savedPlayer.socketId = socket.id;
+      console.log(`${playerName} reconnected to loaded save`);
+      broadcastGameState();
       return;
     }
 
@@ -735,7 +907,14 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
-httpServer.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
+initDb()
+  .then(() => {
+    httpServer.listen(PORT, () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  })
+  .catch(err => {
+    console.error('Failed to initialize database:', err);
+    process.exit(1);
+  });
 
