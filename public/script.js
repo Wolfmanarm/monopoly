@@ -408,8 +408,10 @@ window.addEventListener('unhandledrejection', (e) => {
 function updateUI() {
     if (!gameState) return;
 
-    // Update lobby
-    if (!gameState.gameStarted) {
+    // Show lobby if game hasn't started, or if this socket hasn't reconnected to a
+    // player slot yet (e.g. after a saved game is loaded and socketIds are cleared)
+    const myPlayer = gameState.players.find(p => p.socketId === socket.id);
+    if (!gameState.gameStarted || !myPlayer) {
         updateLobby();
         return;
     }
@@ -477,7 +479,11 @@ function updateLobby() {
         lobbyStatus.textContent = `Need at least 2 players to start (${gameState.players.length}/2)`;
     } else {
         startBtn.style.display = 'none';
-        lobbyStatus.textContent = 'Game in progress';
+        const reconnected = gameState.players.filter(p => p.socketId).length;
+        const total = gameState.players.length;
+        lobbyStatus.textContent = reconnected < total
+            ? `Saved game loaded — enter your saved name to rejoin (${reconnected}/${total} reconnected)`
+            : 'Game in progress';
     }
 }
 
