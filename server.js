@@ -232,12 +232,10 @@ app.post('/api/load-game', async (req, res) => {
       return res.status(404).json({ error: 'Save not found' });
     }
     const savedState = JSON.parse(save.game_data);
-    // Clear socket IDs so players can rejoin by name
     savedState.players.forEach(p => { p.socketId = null; });
-    // Keep gameStarted = true so the game resumes; reset phase to rolling so
-    // players can roll once they reconnect. Clear any pending mid-turn state.
     savedState.gameStarted = true;
     savedState.gamePhase = 'rolling';
+    savedState.freePlay = true;
     delete savedState.pendingRent;
     Object.assign(gameState, savedState);
     broadcastGameState();
@@ -458,7 +456,7 @@ io.on('connection', (socket) => {
   socket.on('rollDice', () => {
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     
-    if (socket.id !== currentPlayer.socketId) {
+    if (!gameState.freePlay && socket.id !== currentPlayer.socketId) {
       socket.emit('error', 'Not your turn');
       return;
     }
@@ -677,7 +675,7 @@ io.on('connection', (socket) => {
       return;
     }
 
-    if (socket.id !== payer.socketId) {
+    if (!gameState.freePlay && socket.id !== payer.socketId) {
       socket.emit('error', 'Only the owing player can confirm payment');
       return;
     }
@@ -735,7 +733,7 @@ io.on('connection', (socket) => {
   socket.on('payJailFine', () => {
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
 
-    if (!currentPlayer || socket.id !== currentPlayer.socketId) {
+    if (!currentPlayer || (!gameState.freePlay && socket.id !== currentPlayer.socketId)) {
       socket.emit('error', 'Not your turn');
       return;
     }
@@ -770,7 +768,7 @@ io.on('connection', (socket) => {
   socket.on('useGetOutOfJailCard', () => {
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
 
-    if (!currentPlayer || socket.id !== currentPlayer.socketId) {
+    if (!currentPlayer || (!gameState.freePlay && socket.id !== currentPlayer.socketId)) {
       socket.emit('error', 'Not your turn');
       return;
     }
@@ -808,7 +806,7 @@ io.on('connection', (socket) => {
   socket.on('buyProperty', () => {
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     
-    if (socket.id !== currentPlayer.socketId) {
+    if (!gameState.freePlay && socket.id !== currentPlayer.socketId) {
       socket.emit('error', 'Not your turn');
       return;
     }
@@ -865,7 +863,7 @@ io.on('connection', (socket) => {
   socket.on('skipBuy', () => {
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     
-    if (socket.id !== currentPlayer.socketId) {
+    if (!gameState.freePlay && socket.id !== currentPlayer.socketId) {
       socket.emit('error', 'Not your turn');
       return;
     }

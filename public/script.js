@@ -56,7 +56,7 @@ rollDiceBtn.addEventListener('click', () => {
     if (!gameState) return;
 
     const currentPlayer = gameState.players?.[gameState.currentPlayerIndex];
-    const isMyTurn = currentPlayer && currentPlayer.socketId === socket.id;
+    const isMyTurn = currentPlayer && (gameState.freePlay || currentPlayer.socketId === socket.id);
 
     if (gameState.gamePhase === 'payingRent' && isMyTurn && gameState.pendingRent && currentPlayer && gameState.pendingRent.payerId === currentPlayer.id) {
         console.log('Pay Rent clicked via roll button — emitting payRent');
@@ -250,7 +250,6 @@ async function loadSavedGames() {
                     });
                     const data = await res.json();
                     if (!res.ok) { alert(data.error); return; }
-                    alert(`Loaded "${data.name}". Players can now rejoin using their saved names.`);
                 } catch { alert('Failed to load game'); }
             });
         });
@@ -411,7 +410,7 @@ function updateUI() {
     // Show lobby if game hasn't started, or if this socket hasn't reconnected to a
     // player slot yet (e.g. after a saved game is loaded and socketIds are cleared)
     const myPlayer = gameState.players.find(p => p.socketId === socket.id);
-    if (!gameState.gameStarted || !myPlayer) {
+    if (!gameState.gameStarted || (!myPlayer && !gameState.freePlay)) {
         updateLobby();
         return;
     }
@@ -604,7 +603,7 @@ function updatePlayersList() {
 
 function updateControls() {
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
-    const isMyTurn = currentPlayer && currentPlayer.socketId === socket.id;
+    const isMyTurn = currentPlayer && (gameState.freePlay || currentPlayer.socketId === socket.id);
 
     // Default roll dice button state
     rollDiceBtn.textContent = 'Roll Dice';
