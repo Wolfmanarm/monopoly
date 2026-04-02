@@ -3,7 +3,9 @@ const socket = io();
 
 let gameState = null;
 let currentPlayerId = null;
-let myPlayerId = null; // Track which player is "me" by player ID, not socket ID
+let currentUser = null; // { id, username } when logged in, null otherwise
+let hasLoggedOut = false; // true after explicit logout, prevents game screen from reappearing
+
 // Track connection id when connected
 socket.on('connect', () => {
     currentPlayerId = socket.id;
@@ -23,51 +25,17 @@ const playersList = document.getElementById('playersList');
 const rollDiceBtn = document.getElementById('rollDiceBtn');
 const buyPropertyBtn = document.getElementById('buyPropertyBtn');
 const skipBuyBtn = document.getElementById('skipBuyBtn');
-const proposeTradeBtn = document.getElementById('proposeTradeBtn');
 const payJailFineBtn = document.getElementById('payJailFineBtn');
 const useJailCardBtn = document.getElementById('useJailCardBtn');
 const gameMessage = document.getElementById('gameMessage');
 const gameStatus = document.getElementById('gameStatus');
 const controlsTurnStatus = document.getElementById('controlsTurnStatus');
 const diceDisplay = document.getElementById('diceDisplay');
-const buildingControls = document.getElementById('buildingControls');
 const howToPlayToggle = document.getElementById('howToPlayToggle');
 const howToPlayContent = document.getElementById('howToPlayContent');
-const lobbyTutorialBtn = document.getElementById('lobbyTutorialBtn');
-const gameTutorialBtn = document.getElementById('gameTutorialBtn');
-const tutorialOverlay = document.getElementById('tutorialOverlay');
-const tutorialCard = document.getElementById('tutorialCard');
-const tutorialStepCounter = document.getElementById('tutorialStepCounter');
-const tutorialTitle = document.getElementById('tutorialTitle');
-const tutorialText = document.getElementById('tutorialText');
-const tutorialPrevBtn = document.getElementById('tutorialPrevBtn');
-const tutorialNextBtn = document.getElementById('tutorialNextBtn');
-const tutorialCloseBtn = document.getElementById('tutorialCloseBtn');
-
-let tutorialSteps = [];
-let tutorialIndex = 0;
-let tutorialActive = false;
-
-// Trade Modal elements
-const tradeModal = document.getElementById('tradeModal');
-const tradeModalClose = document.getElementById('tradeModalClose');
-const tradeTarget = document.getElementById('tradeTarget');
-const offerMoney = document.getElementById('offerMoney');
-const offerProperties = document.getElementById('offerProperties');
-const requestMoney = document.getElementById('requestMoney');
-const requestProperties = document.getElementById('requestProperties');
-const tradeSubmitBtn = document.getElementById('tradeSubmitBtn');
-const tradeCancelBtn = document.getElementById('tradeCancelBtn');
-
-// Trade Response Modal elements
-const tradeResponseModal = document.getElementById('tradeResponseModal');
-const tradeProposalContent = document.getElementById('tradeProposalContent');
-const respondAsPlayer = document.getElementById('respondAsPlayer');
-const tradeAcceptBtn = document.getElementById('tradeAcceptBtn');
-const tradeRejectBtn = document.getElementById('tradeRejectBtn');
-
-let pendingTradeId = null;
-let pendingTradeTargetId = null;
+const saveGameBtn = document.getElementById('saveGameBtn');
+const gameLogoutBtn = document.getElementById('gameLogoutBtn');
+const saveGameMessage = document.getElementById('saveGameMessage');
 
 // Join game
 joinBtn.addEventListener('click', () => {
@@ -88,7 +56,7 @@ rollDiceBtn.addEventListener('click', () => {
     if (!gameState) return;
 
     const currentPlayer = gameState.players?.[gameState.currentPlayerIndex];
-    const isMyTurn = currentPlayer && currentPlayer.socketId === socket.id;
+    const isMyTurn = currentPlayer && (gameState.freePlay || currentPlayer.socketId === socket.id);
 
     if (gameState.gamePhase === 'payingRent' && isMyTurn && gameState.pendingRent && currentPlayer && gameState.pendingRent.payerId === currentPlayer.id) {
         console.log('Pay Rent clicked via roll button — emitting payRent');
@@ -111,125 +79,6 @@ skipBuyBtn.addEventListener('click', () => {
     socket.emit('skipBuy');
 });
 
-// Propose trade button - open modal
-if (proposeTradeBtn) {
-    proposeTradeBtn.addEventListener('click', () => {
-        if (!gameState) return alert('No game in progress');
-
-        const others = gameState.players.filter(p => p.id !== myPlayerId);
-        if (others.length === 0) return alert('No other players to trade with');
-
-        // Populate player dropdown
-        tradeTarget.innerHTML = '<option value="">Select a player</option>';
-        others.forEach(player => {
-            const option = document.createElement('option');
-            option.value = player.id;
-            option.textContent = player.name;
-            tradeTarget.appendChild(option);
-        });
-
-        // Clear form
-        offerMoney.value = '0';
-        requestMoney.value = '0';
-        offerProperties.innerHTML = '';
-        requestProperties.innerHTML = '';
-
-        // Show modal
-        tradeModal.style.display = 'flex';
-    });
-}
-
-// Modal close handlers
-tradeModalClose.addEventListener('click', () => {
-    tradeModal.style.display = 'none';
-});
-
-tradeCancelBtn.addEventListener('click', () => {
-    tradeModal.style.display = 'none';
-});
-
-// Close modal when clicking outside of it
-tradeModal.addEventListener('click', (e) => {
-    if (e.target === tradeModal) {
-        tradeModal.style.display = 'none';
-    }
-});
-
-// When target player changes, populate available properties
-tradeTarget.addEventListener('change', () => {
-    const targetId = tradeTarget.value;
-    if (!targetId) {
-        offerProperties.innerHTML = '';
-        requestProperties.innerHTML = '';
-        return;
-    }
-
-    const me = gameState.players.find(p => p.id === myPlayerId);
-    const target = gameState.players.find(p => p.id === targetId);
-
-    // Populate my properties (offer)
-    offerProperties.innerHTML = '';
-    if (me && me.properties && me.properties.length > 0) {
-        me.properties.forEach(propId => {
-            const prop = gameState.board[propId];
-            const label = document.createElement('label');
-            label.className = 'property-checkbox';
-            const checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.value = propId;
-            checkbox.dataset.player = 'me';
-            const text = document.createElement('span');
-            text.textContent = prop.name;
-            label.appendChild(checkbox);
-            label.appendChild(text);
-            offerProperties.appendChild(label);
-        });
-    } else {
-        offerProperties.innerHTML = '<div style="color: #999; font-size: 12px;">No properties owned</div>';
-    }
-
-    // Populate target properties (request)
-    requestProperties.innerHTML = '';
-    if (target && target.properties && target.properties.length > 0) {
-        target.properties.forEach(propId => {
-            const prop = gameState.board[propId];
-            const label = document.createElement('label');
-            label.className = 'property-checkbox';
-            const checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.value = propId;
-            checkbox.dataset.player = 'target';
-            const text = document.createElement('span');
-            text.textContent = prop.name;
-            label.appendChild(checkbox);
-            label.appendChild(text);
-            requestProperties.appendChild(label);
-        });
-    } else {
-        requestProperties.innerHTML = '<div style="color: #999; font-size: 12px;">No properties owned</div>';
-    }
-});
-
-// Submit trade
-tradeSubmitBtn.addEventListener('click', () => {
-    const targetId = tradeTarget.value;
-    if (!targetId) return alert('Please select a player');
-
-    const offerMonetyVal = Number(offerMoney.value) || 0;
-    const requestMoneyVal = Number(requestMoney.value) || 0;
-
-    const offerPropsChecked = Array.from(offerProperties.querySelectorAll('input:checked')).map(c => Number(c.value));
-    const requestPropsChecked = Array.from(requestProperties.querySelectorAll('input:checked')).map(c => Number(c.value));
-
-    socket.emit('proposeTrade', {
-        toPlayerId: targetId,
-        offer: { money: offerMonetyVal, properties: offerPropsChecked },
-        request: { money: requestMoneyVal, properties: requestPropsChecked }
-    });
-
-    tradeModal.style.display = 'none';
-});
-
 // How to Play toggle
 if (howToPlayToggle && howToPlayContent) {
     howToPlayToggle.addEventListener('click', () => {
@@ -246,18 +95,215 @@ useJailCardBtn.addEventListener('click', () => {
     socket.emit('useGetOutOfJailCard');
 });
 
+// ── Auth UI ──────────────────────────────────────────────────────────────────
+
+const authForms = document.getElementById('authForms');
+const loggedInSection = document.getElementById('loggedInSection');
+const loggedInName = document.getElementById('loggedInName');
+const loginTab = document.getElementById('loginTab');
+const registerTab = document.getElementById('registerTab');
+const showLoginTab = document.getElementById('showLoginTab');
+const showRegisterTab = document.getElementById('showRegisterTab');
+const authMessage = document.getElementById('authMessage');
+const savedGamesList = document.getElementById('savedGamesList');
+
+function showAuthMessage(msg, isError) {
+    authMessage.textContent = msg;
+    authMessage.style.color = isError ? '#c0392b' : '#27ae60';
+}
+
+function setLoggedIn(user) {
+    hasLoggedOut = false;
+    currentUser = user;
+    authForms.style.display = 'none';
+    loggedInSection.style.display = 'block';
+    loggedInName.textContent = user.username;
+    if (saveGameBtn) saveGameBtn.style.display = 'block';
+    if (gameLogoutBtn) gameLogoutBtn.style.display = 'block';
+    loadSavedGames();
+}
+
+function setLoggedOut() {
+    hasLoggedOut = true;
+    currentUser = null;
+    authForms.style.display = 'block';
+    loggedInSection.style.display = 'none';
+    if (saveGameBtn) saveGameBtn.style.display = 'none';
+    if (gameLogoutBtn) gameLogoutBtn.style.display = 'none';
+    if (savedGamesList) savedGamesList.innerHTML = '';
+    lobbyScreen.style.display = 'block';
+    gameScreen.style.display = 'none';
+}
+
+// Check if already logged in on page load
+fetch('/api/me')
+    .then(r => r.ok ? r.json() : null)
+    .then(user => { if (user) setLoggedIn(user); })
+    .catch(() => {});
+
+// Tab switching
+showLoginTab.addEventListener('click', () => {
+    loginTab.style.display = 'block';
+    registerTab.style.display = 'none';
+    showLoginTab.classList.add('auth-tab-active');
+    showRegisterTab.classList.remove('auth-tab-active');
+    authMessage.textContent = '';
+});
+
+showRegisterTab.addEventListener('click', () => {
+    loginTab.style.display = 'none';
+    registerTab.style.display = 'block';
+    showRegisterTab.classList.add('auth-tab-active');
+    showLoginTab.classList.remove('auth-tab-active');
+    authMessage.textContent = '';
+});
+
+// Login
+document.getElementById('loginBtn').addEventListener('click', async () => {
+    const username = document.getElementById('loginUsername').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    if (!username || !password) { showAuthMessage('Enter username and password', true); return; }
+    try {
+        const res = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (!res.ok) { showAuthMessage(data.error, true); return; }
+        setLoggedIn(data);
+        document.getElementById('loginUsername').value = '';
+        document.getElementById('loginPassword').value = '';
+    } catch { showAuthMessage('Login failed', true); }
+});
+
+// Register
+document.getElementById('registerBtn').addEventListener('click', async () => {
+    const username = document.getElementById('regUsername').value.trim();
+    const password = document.getElementById('regPassword').value;
+    if (!username || !password) { showAuthMessage('Enter username and password', true); return; }
+    try {
+        const res = await fetch('/api/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (!res.ok) { showAuthMessage(data.error, true); return; }
+        setLoggedIn(data);
+        document.getElementById('regUsername').value = '';
+        document.getElementById('regPassword').value = '';
+    } catch { showAuthMessage('Registration failed', true); }
+});
+
+// Logout
+document.getElementById('logoutBtn').addEventListener('click', async () => {
+    await fetch('/api/logout', { method: 'POST' });
+    setLoggedOut();
+});
+
+// Game screen logout button
+if (gameLogoutBtn) {
+    gameLogoutBtn.addEventListener('click', async () => {
+        await fetch('/api/logout', { method: 'POST' });
+        setLoggedOut();
+    });
+}
+
+// Refresh saves button
+document.getElementById('refreshSavesBtn').addEventListener('click', loadSavedGames);
+
+async function loadSavedGames() {
+    if (!currentUser) return;
+    try {
+        const res = await fetch('/api/saved-games');
+        if (!res.ok) return;
+        const saves = await res.json();
+        savedGamesList.innerHTML = '';
+        if (saves.length === 0) {
+            savedGamesList.innerHTML = '<div class="no-saves">No saved games yet.</div>';
+            return;
+        }
+        saves.forEach(save => {
+            const date = new Date(save.saved_at).toLocaleString();
+            const item = document.createElement('div');
+            item.className = 'saved-game-item';
+            item.innerHTML = `
+                <span class="save-name">${save.name}</span>
+                <span class="save-date">${date}</span>
+                <div class="save-actions">
+                    <button class="auth-btn-small load-save-btn" data-id="${save.id}" data-name="${save.name}">Load</button>
+                    <button class="auth-btn-small delete-save-btn" data-id="${save.id}">Delete</button>
+                </div>
+            `;
+            savedGamesList.appendChild(item);
+        });
+
+        savedGamesList.querySelectorAll('.load-save-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                if (!confirm(`Load "${btn.dataset.name}"? This will replace the current game for all players.`)) return;
+                try {
+                    const res = await fetch('/api/load-game', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ saveId: Number(btn.dataset.id) })
+                    });
+                    const data = await res.json();
+                    if (!res.ok) { alert(data.error); return; }
+                } catch { alert('Failed to load game'); }
+            });
+        });
+
+        savedGamesList.querySelectorAll('.delete-save-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                if (!confirm('Delete this save?')) return;
+                try {
+                    const res = await fetch(`/api/saved-games/${btn.dataset.id}`, { method: 'DELETE' });
+                    if (res.ok) loadSavedGames();
+                } catch { alert('Failed to delete save'); }
+            });
+        });
+    } catch { /* ignore */ }
+}
+
+// ── Save Game ────────────────────────────────────────────────────────────────
+
+if (saveGameBtn) {
+    saveGameBtn.addEventListener('click', async () => {
+        if (!currentUser) {
+            saveGameMessage.textContent = 'You must be logged in to save.';
+            saveGameMessage.style.color = '#c0392b';
+            return;
+        }
+        const name = prompt('Enter a name for this save:');
+        if (!name || !name.trim()) return;
+        try {
+            const res = await fetch('/api/save-game', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name.trim() })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                saveGameMessage.textContent = data.error;
+                saveGameMessage.style.color = '#c0392b';
+                return;
+            }
+            saveGameMessage.textContent = `Game saved as "${data.name}"!`;
+            saveGameMessage.style.color = '#27ae60';
+            setTimeout(() => { saveGameMessage.textContent = ''; }, 3000);
+        } catch {
+            saveGameMessage.textContent = 'Failed to save game.';
+            saveGameMessage.style.color = '#c0392b';
+        }
+    });
+}
+
+// ── Socket event listeners ───────────────────────────────────────────────────
+
 // Socket event listeners
 socket.on('gameState', (state) => {
     gameState = state;
-    
-    // Set myPlayerId when we first see a player with our socketId
-    if (!myPlayerId && gameState.players) {
-        const mePlayer = gameState.players.find(p => p.socketId === currentPlayerId);
-        if (mePlayer) {
-            myPlayerId = mePlayer.id;
-        }
-    }
-    
     updateUI();
 });
 
@@ -352,111 +398,6 @@ socket.on('error', (message) => {
     console.error('Socket error:', message);
 });
 
-// Trade-related socket handlers
-socket.on('tradeProposed', (data) => {
-    const trade = data.trade;
-    const fromName = data.from?.name || 'Someone';
-    
-    pendingTradeId = trade.id;
-    pendingTradeTargetId = trade.toId;
-
-    // Build content HTML
-    let offerPropsHtml = 'None';
-    if (trade.offer.properties && trade.offer.properties.length > 0) {
-        offerPropsHtml = trade.offer.properties
-            .map(pid => gameState.board[pid]?.name || `Property #${pid}`)
-            .join(', ');
-    }
-
-    let requestPropsHtml = 'None';
-    if (trade.request.properties && trade.request.properties.length > 0) {
-        requestPropsHtml = trade.request.properties
-            .map(pid => gameState.board[pid]?.name || `Property #${pid}`)
-            .join(', ');
-    }
-
-    tradeProposalContent.innerHTML = `
-        <div style="background: #fff3cd; padding: 12px; border-radius: 6px; margin-bottom: 16px; border-left: 4px solid #ff9800;">
-            <strong style="color: #ff9800;">⚠️ To respond to this trade, select your player below (for local testing)</strong>
-        </div>
-        <strong>${fromName}</strong> is proposing a trade:<br><br>
-        <div style="margin-left: 10px; border-left: 3px solid #667eea; padding-left: 10px;">
-            <strong style="color: #667eea;">They offer:</strong><br>
-            $${trade.offer.money} and properties: ${offerPropsHtml}<br><br>
-            <strong style="color: #667eea;">They request:</strong><br>
-            $${trade.request.money} and properties: ${requestPropsHtml}
-        </div>
-    `;
-
-    // Populate player dropdown
-    respondAsPlayer.innerHTML = '<option value="">Select player to respond</option>';
-    gameState.players.forEach(player => {
-        const option = document.createElement('option');
-        option.value = player.id;
-        option.textContent = player.name;
-        respondAsPlayer.appendChild(option);
-    });
-
-    tradeResponseModal.style.display = 'flex';
-});
-
-
-socket.on('tradeProposalSent', (data) => {
-    gameMessage.textContent = 'Trade proposal sent.';
-});
-
-// Trade response modal handlers
-tradeAcceptBtn.addEventListener('click', () => {
-    if (!pendingTradeId) return;
-    const selectedPlayerId = respondAsPlayer.value;
-    if (!selectedPlayerId) return alert('Please select a player to respond as');
-    
-    socket.emit('respondTrade', { tradeId: pendingTradeId, accept: true, respondAsId: selectedPlayerId });
-    tradeResponseModal.style.display = 'none';
-    pendingTradeId = null;
-    pendingTradeTargetId = null;
-});
-
-tradeRejectBtn.addEventListener('click', () => {
-    if (!pendingTradeId) return;
-    const selectedPlayerId = respondAsPlayer.value;
-    if (!selectedPlayerId) return alert('Please select a player to respond as');
-    
-    socket.emit('respondTrade', { tradeId: pendingTradeId, accept: false, respondAsId: selectedPlayerId });
-    tradeResponseModal.style.display = 'none';
-    pendingTradeId = null;
-    pendingTradeTargetId = null;
-});
-
-
-socket.on('tradeExecuted', (data) => {
-    gameMessage.textContent = 'Trade executed.';
-    updateUI();
-});
-
-socket.on('tradeDeclined', (data) => {
-    gameMessage.textContent = 'Trade declined.';
-});
-
-socket.on('tradeError', (msg) => {
-    gameMessage.textContent = `Trade error: ${msg}`;
-    console.error('Trade error:', msg);
-});
-
-socket.on('tradeNotification', (data) => {
-    gameMessage.textContent = data.message || 'Trade update';
-    updateUI();
-});
-
-socket.on('buildingBought', (data) => {
-    if (data.buildingType === 'hotel') {
-        gameMessage.textContent = `${data.playerName} bought a hotel on ${data.propertyName} for $${data.cost}`;
-    } else {
-        gameMessage.textContent = `${data.playerName} bought a house on ${data.propertyName} for $${data.cost}`;
-    }
-    updateUI();
-});
-
 // Log unhandled promise rejections to help debug extension vs app issues
 window.addEventListener('unhandledrejection', (e) => {
     console.error('Unhandled promise rejection:', e.reason, e);
@@ -466,8 +407,10 @@ window.addEventListener('unhandledrejection', (e) => {
 function updateUI() {
     if (!gameState) return;
 
-    // Update lobby
-    if (!gameState.gameStarted) {
+    // Show lobby if game hasn't started, or if this socket hasn't reconnected to a
+    // player slot yet (e.g. after a saved game is loaded and socketIds are cleared)
+    const myPlayer = gameState.players.find(p => p.socketId === socket.id);
+    if (!gameState.gameStarted || (!myPlayer && !gameState.freePlay)) {
         updateLobby();
         return;
     }
@@ -475,6 +418,10 @@ function updateUI() {
     // Show game screen
     lobbyScreen.style.display = 'none';
     gameScreen.style.display = 'block';
+
+    // Show save/logout buttons only if logged in
+    if (saveGameBtn) saveGameBtn.style.display = currentUser ? 'block' : 'none';
+    if (gameLogoutBtn) gameLogoutBtn.style.display = currentUser ? 'block' : 'none';
 
     // Update board
     renderBoard();
@@ -493,10 +440,6 @@ function updateUI() {
         controlsTurnStatus.textContent = `${currentPlayer.name}'s Turn`;
         controlsTurnStatus.style.color = currentPlayer.color;
     }
-
-    if (tutorialActive) {
-        renderTutorialStep();
-    }
 }
 
 function updateLobby() {
@@ -511,11 +454,19 @@ function updateLobby() {
         const playerDiv = document.createElement('div');
         playerDiv.className = 'lobby-player';
         playerDiv.style.borderLeft = `4px solid ${player.color}`;
+        const isMe = player.socketId === socket.id;
         playerDiv.innerHTML = `
             <span class="player-name" title="${propertyTooltip}">${player.name}</span>
             <span class="player-money">$${player.money}</span>
+            ${isMe ? `<button class="remove-player-btn" data-id="${player.id}">Leave</button>` : ''}
         `;
         playerList.appendChild(playerDiv);
+    });
+
+    playerList.querySelectorAll('.remove-player-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            socket.emit('removePlayer', btn.dataset.id);
+        });
     });
 
     // Show start button if 2+ players and not started
@@ -527,7 +478,11 @@ function updateLobby() {
         lobbyStatus.textContent = `Need at least 2 players to start (${gameState.players.length}/2)`;
     } else {
         startBtn.style.display = 'none';
-        lobbyStatus.textContent = 'Game in progress';
+        const reconnected = gameState.players.filter(p => p.socketId).length;
+        const total = gameState.players.length;
+        lobbyStatus.textContent = reconnected < total
+            ? `Saved game loaded — enter your saved name to rejoin (${reconnected}/${total} reconnected)`
+            : 'Game in progress';
     }
 }
 
@@ -606,15 +561,14 @@ function createSpace(spaceId, row, col) {
     const ownerColor = owner ? owner.color : null;
     
     spaceDiv.innerHTML = `
-    <div class="space-content">
-        ${space.color ? `<div class="color-bar" style="background-color: ${getColorHex(space.color)}"></div>` : ''}
-        ${ownerColor ? `<div class="owner-indicator" style="background-color: ${ownerColor}"></div>` : ''}
-        <div class="space-name">${space.name}</div>
-        ${space.price > 0 ? `<div class="space-price">$${space.price}</div>` : ''}
-        ${space.amount ? `<div class="space-price">$${space.amount}</div>` : ''}
-        ${renderBuildingMarkers(space)}
-    </div>
-    <div class="space-tokens"></div>
+        <div class="space-content">
+            ${space.color ? `<div class="color-bar" style="background-color: ${getColorHex(space.color)}"></div>` : ''}
+            ${ownerColor ? `<div class="owner-indicator" style="background-color: ${ownerColor}"></div>` : ''}
+            <div class="space-name">${space.name}</div>
+            ${space.price > 0 ? `<div class="space-price">$${space.price}</div>` : ''}
+            ${space.amount ? `<div class="space-price">$${space.amount}</div>` : ''}
+        </div>
+        <div class="space-tokens"></div>
     `;
     gameBoard.appendChild(spaceDiv);
 }
@@ -649,7 +603,7 @@ function updatePlayersList() {
 
 function updateControls() {
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
-    const isMyTurn = currentPlayer && currentPlayer.socketId === socket.id;
+    const isMyTurn = currentPlayer && (gameState.freePlay || currentPlayer.socketId === socket.id);
 
     // Default roll dice button state
     rollDiceBtn.textContent = 'Roll Dice';
@@ -672,11 +626,8 @@ function updateControls() {
         const isPayer = isMyTurn && currentPlayer && gameState.pendingRent.payerId === currentPlayer.id;
         rollDiceBtn.textContent = `Pay Rent: $${gameState.pendingRent.rent}`;
         rollDiceBtn.disabled = !isPayer;
-        rollDiceBtn.classList.add('flashing');
         buyPropertyBtn.style.display = 'none';
         skipBuyBtn.style.display = 'none';
-    } else {
-        rollDiceBtn.classList.remove('flashing');
     }
 
     // Jail controls
@@ -695,58 +646,6 @@ function updateControls() {
     if (payRentBtn) {
         payRentBtn.style.display = 'none';
     }
-
-    updateBuildingControls(currentPlayer, isMyTurn);
-}
-
-function updateBuildingControls(currentPlayer, isMyTurn) {
-    if (!buildingControls) return;
-
-    buildingControls.innerHTML = '';
-
-    if (!currentPlayer || !isMyTurn) return;
-
-    if (!['rolling', 'buying'].includes(gameState.gamePhase)) return;
-
-    const ownedBuildableProperties = currentPlayer.properties
-        .map(propertyId => gameState.board[propertyId])
-        .filter(space => space && space.type === 'property' && space.color && space.houseCost);
-
-    const eligibleSetProperties = ownedBuildableProperties.filter(space =>
-        playerOwnsFullSetLocal(currentPlayer, space.color)
-    );
-
-    if (eligibleSetProperties.length === 0) return;
-
-    const title = document.createElement('div');
-    title.className = 'building-controls-title';
-    title.textContent = 'Buy Houses / Hotels';
-    buildingControls.appendChild(title);
-
-    eligibleSetProperties.forEach(space => {
-        const row = document.createElement('div');
-        row.className = 'building-row';
-
-        const currentCount = space.hotel ? 'Hotel' : `${space.houses || 0} house(s)`;
-        const nextLabel = space.hotel
-            ? 'Maxed'
-            : ((space.houses || 0) < 4 ? 'Buy House' : 'Buy Hotel');
-
-        const info = document.createElement('span');
-        info.textContent = `${space.name} — ${currentCount}`;
-
-        const button = document.createElement('button');
-        button.textContent = `${nextLabel} ($${space.houseCost})`;
-        button.disabled = !canBuildOnPropertyLocal(currentPlayer, space.id);
-
-        button.addEventListener('click', () => {
-            socket.emit('buyBuilding', { propertyId: space.id });
-        });
-
-        row.appendChild(info);
-        row.appendChild(button);
-        buildingControls.appendChild(row);
-    });
 }
 
 function displayDice(dice) {
@@ -808,280 +707,5 @@ function getPlayerPropertyNames(player) {
     return player.properties
         .map(propertyID => gameState.board[propertyID]?.name)
         .filter(Boolean);
-}
-
-//purpose: check if play owns all of a color group to let them buy houses and hotels
-function playerOwnsFullSetLocal(player, color) {
-    const groups = {
-        brown: [1, 3],
-        lightblue: [6, 8, 9],
-        pink: [11, 13, 14],
-        orange: [16, 18, 19],
-        red: [21, 23, 24],
-        yellow: [26, 27, 29],
-        green: [31, 32, 34],
-        darkblue: [37, 39]
-    };
-
-    const group = groups[color];
-    if (!group) return false;
-    return group.every(id => player.properties.includes(id));
-}
-
-function getLocalBuildingCount(space) {
-    return space.hotel ? 5 : (space.houses || 0);
-}
-
-function canBuildOnPropertyLocal(player, propertyId) {
-    const property = gameState.board[propertyId];
-    if (!property || property.type !== 'property' || !property.color || !property.houseCost) {
-        return false;
-    }
-
-    if (!player.properties.includes(propertyId)) {
-        return false;
-    }
-
-    if (!playerOwnsFullSetLocal(player, property.color)) {
-        return false;
-    }
-
-    if (property.hotel) {
-        return false;
-    }
-
-    const groups = {
-        brown: [1, 3],
-        lightblue: [6, 8, 9],
-        pink: [11, 13, 14],
-        orange: [16, 18, 19],
-        red: [21, 23, 24],
-        yellow: [26, 27, 29],
-        green: [31, 32, 34],
-        darkblue: [37, 39]
-    };
-
-    const groupIds = groups[property.color] || [];
-    const groupSpaces = groupIds.map(id => gameState.board[id]);
-
-    const propertyCount = getLocalBuildingCount(property);
-    const minCount = Math.min(...groupSpaces.map(getLocalBuildingCount));
-
-    if (propertyCount > minCount) {
-        return false;
-    }
-
-    return player.money >= property.houseCost;
-}
-
-function renderBuildingMarkers(space) {
-    if (!space || space.type !== 'property') return '';
-
-    if (space.hotel) {
-        return `<div class="building-markers"><span class="hotel-marker">🏨</span></div>`;
-    }
-
-    const houses = space.houses || 0;
-    if (houses <= 0) return '';
-
-    return `
-        <div class="building-markers">
-            ${Array.from({ length: houses }).map(() => `<span class="house-marker">🏠</span>`).join('')}
-        </div>
-    `;
-}
-
-function getTutorialSteps() {
-    const baseSteps = [
-        {
-            selector: '#playerName',
-            title: 'Join the Game',
-            text: 'Type your name and click Join Game. You need at least 2 players to start.'
-        },
-        {
-            selector: '#startBtn',
-            title: 'Start Match',
-            text: 'Once 2+ players have joined, click Start Game to begin.'
-        },
-        {
-            selector: '#playersList',
-            title: 'Track Players',
-            text: 'This panel shows money, turn order, and property count for everyone.'
-        },
-        {
-            selector: '#rollDiceBtn',
-            title: 'Take Your Turn',
-            text: 'On your turn, use this button to roll. During rent, this changes to Pay Rent.'
-        },
-        {
-            selector: '#gameBoard',
-            title: 'Read the Board',
-            text: 'Token positions, ownership bars, and buildings are shown directly on board spaces.'
-        },
-        {
-            selector: '#gameMessage',
-            title: 'Watch Events',
-            text: 'Important outcomes (rent, taxes, cards, jail) are described here each turn.'
-        },
-        {
-            selector: '#howToPlayToggle',
-            title: 'Quick Rules',
-            text: 'Use How to Play anytime for a compact rules reference.'
-        }
-    ];
-
-    return baseSteps;
-}
-
-function clearTutorialFocus() {
-    document.querySelectorAll('.tutorial-focus').forEach(el => el.classList.remove('tutorial-focus'));
-}
-
-function findStepElement(selector) {
-    const element = document.querySelector(selector);
-    if (!element) return null;
-
-    const style = window.getComputedStyle(element);
-    if (style.display === 'none' || style.visibility === 'hidden') return null;
-
-    const rect = element.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return null;
-
-    return element;
-}
-
-function positionTutorialCard(target) {
-    const rect = target.getBoundingClientRect();
-    const cardRect = tutorialCard.getBoundingClientRect();
-    const margin = 12;
-
-    let left = rect.right + margin;
-    if (left + cardRect.width > window.innerWidth - margin) {
-        left = rect.left - cardRect.width - margin;
-    }
-    if (left < margin) left = margin;
-
-    let top = rect.top;
-    if (top + cardRect.height > window.innerHeight - margin) {
-        top = window.innerHeight - cardRect.height - margin;
-    }
-    if (top < margin) top = margin;
-
-    tutorialCard.style.left = `${left}px`;
-    tutorialCard.style.top = `${top}px`;
-}
-
-function moveTutorial(direction) {
-    if (!tutorialActive || tutorialSteps.length === 0) return;
-
-    tutorialIndex += direction;
-    if (tutorialIndex < 0) tutorialIndex = 0;
-    if (tutorialIndex >= tutorialSteps.length) {
-        closeTutorial();
-        return;
-    }
-
-    renderTutorialStep();
-}
-
-function renderTutorialStep() {
-    if (!tutorialActive || tutorialSteps.length === 0) return;
-
-    let step = tutorialSteps[tutorialIndex];
-    let target = findStepElement(step.selector);
-
-    let safety = 0;
-    while (!target && tutorialIndex < tutorialSteps.length - 1 && safety < tutorialSteps.length) {
-        tutorialIndex += 1;
-        step = tutorialSteps[tutorialIndex];
-        target = findStepElement(step.selector);
-        safety += 1;
-    }
-
-    if (!target) {
-        closeTutorial();
-        return;
-    }
-
-    clearTutorialFocus();
-    target.classList.add('tutorial-focus');
-    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-    tutorialStepCounter.textContent = `Step ${tutorialIndex + 1} of ${tutorialSteps.length}`;
-    tutorialTitle.textContent = step.title;
-    tutorialText.textContent = step.text;
-    tutorialPrevBtn.disabled = tutorialIndex === 0;
-    tutorialNextBtn.textContent = tutorialIndex === tutorialSteps.length - 1 ? 'Finish' : 'Next';
-
-    requestAnimationFrame(() => positionTutorialCard(target));
-}
-
-function startTutorial() {
-    tutorialSteps = getTutorialSteps();
-    if (!tutorialSteps.length) return;
-
-    tutorialActive = true;
-    tutorialIndex = 0;
-    tutorialOverlay.style.display = 'block';
-    renderTutorialStep();
-}
-
-function closeTutorial() {
-    tutorialActive = false;
-    tutorialOverlay.style.display = 'none';
-    clearTutorialFocus();
-    try {
-        localStorage.setItem('monopolyTutorialSeen', '1');
-    } catch (err) {
-        console.warn('Could not persist tutorial state', err);
-    }
-}
-
-if (lobbyTutorialBtn) {
-    lobbyTutorialBtn.addEventListener('click', startTutorial);
-}
-
-if (gameTutorialBtn) {
-    gameTutorialBtn.addEventListener('click', startTutorial);
-}
-
-if (tutorialPrevBtn) {
-    tutorialPrevBtn.addEventListener('click', () => moveTutorial(-1));
-}
-
-if (tutorialNextBtn) {
-    tutorialNextBtn.addEventListener('click', () => moveTutorial(1));
-}
-
-if (tutorialCloseBtn) {
-    tutorialCloseBtn.addEventListener('click', closeTutorial);
-}
-
-window.addEventListener('resize', () => {
-    if (tutorialActive) renderTutorialStep();
-});
-
-window.addEventListener('scroll', () => {
-    if (tutorialActive) renderTutorialStep();
-}, true);
-
-window.addEventListener('keydown', (event) => {
-    if (!tutorialActive) return;
-    if (event.key === 'Escape') closeTutorial();
-    if (event.key === 'ArrowRight') moveTutorial(1);
-    if (event.key === 'ArrowLeft') moveTutorial(-1);
-});
-
-try {
-    const seenTutorial = localStorage.getItem('monopolyTutorialSeen');
-    if (!seenTutorial) {
-        setTimeout(() => {
-            if (!tutorialActive) {
-                startTutorial();
-            }
-        }, 700);
-    }
-} catch (err) {
-    console.warn('Could not read tutorial state', err);
 }
 
