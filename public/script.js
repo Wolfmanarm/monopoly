@@ -95,6 +95,62 @@ const TRADE_REQUIRED_IDS = [
 function ensureTradeAndTutorialContainers() {
     const gameEl = document.getElementById('game');
     const hasAllTradeNodes = TRADE_REQUIRED_IDS.every((id) => !!document.getElementById(id));
+    if (gameEl && !hasAllTradeNodes) {
+        const oldTradeModal = document.getElementById('tradeModal');
+        const oldTradeResponseModal = document.getElementById('tradeResponseModal');
+        if (oldTradeModal) oldTradeModal.remove();
+        if (oldTradeResponseModal) oldTradeResponseModal.remove();
+        /*
+        gameEl.insertAdjacentHTML('beforeend', `
+        <div id="tradeModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Propose a Trade</h3>
+                    <button id="tradeModalClose" class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label>Trade With:</label>
+                        <select id="tradeTarget"><option value="">Select a player</option></select>
+                    </div>
+                    <div class="trade-columns">
+                        <div class="trade-column">
+                            <h4>You Offer</h4>
+                            <div class="form-group"><label>Money:</label><input type="number" id="offerMoney" min="0" value="0" placeholder="0"></div>
+                            <div class="form-group"><label>Properties (select):</label><div id="offerProperties" class="property-list"></div></div>
+                        </div>
+                        <div class="trade-column">
+                            <h4>You Request</h4>
+                            <div class="form-group"><label>Money:</label><input type="number" id="requestMoney" min="0" value="0" placeholder="0"></div>
+                            <div class="form-group"><label>Properties (select):</label><div id="requestProperties" class="property-list"></div></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="tradeSubmitBtn" class="action-btn">Send Proposal</button>
+                    <button id="tradeCancelBtn" class="action-btn secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
+        <div id="tradeResponseModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header"><h3>Trade Proposal</h3></div>
+                <div class="modal-body">
+                    <div id="tradeProposalContent" style="font-size: 16px; line-height: 1.6;"></div>
+                    <div class="form-group" style="margin-top: 20px;">
+                        <label>Respond as (local testing only):</label>
+                        <select id="respondAsPlayer"><option value="">Select player</option></select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="tradeAcceptBtn" class="action-btn">Accept</button>
+                    <button id="tradeRejectBtn" class="action-btn secondary">Decline</button>
+                </div>
+            </div>
+        </div>`);*/
+
+        tradeHandlersBound = false;
+    }
    
 }
 
@@ -415,28 +471,7 @@ document.addEventListener('click', (e) => {
         return;
     }
 
-    const clickedTutorialNav = target.closest('#tutorialPrevBtn, #tutorialNextBtn, #tutorialCloseBtn');
-    if (clickedTutorialNav) {
-        if (clickedTutorialNav.id === 'tutorialCloseBtn') {
-            closeTutorial();
-            return;
-        }
-        if (clickedTutorialNav.id === 'tutorialPrevBtn') {
-            if (tutorialIndex > 0) {
-                tutorialIndex -= 1;
-                renderTutorialStep();
-            }
-            return;
-        }
-        if (clickedTutorialNav.id === 'tutorialNextBtn') {
-            if (tutorialIndex >= tutorialSteps.length - 1) {
-                closeTutorial();
-            } else {
-                tutorialIndex += 1;
-                renderTutorialStep();
-            }
-        }
-    }
+    
 });
 
 // How to Play toggle
@@ -1471,32 +1506,6 @@ function startTutorial() {
     tutorialActive = true;
     overlay.style.display = 'block';
     renderTutorialStep();
-}
-
-if (lobbyTutorialBtn) lobbyTutorialBtn.addEventListener('click', startTutorial);
-if (gameTutorialBtn) gameTutorialBtn.addEventListener('click', startTutorial);
-
-if (tutorialPrevBtn) {
-    tutorialPrevBtn.addEventListener('click', () => {
-        if (tutorialIndex <= 0) return;
-        tutorialIndex -= 1;
-        renderTutorialStep();
-    });
-}
-
-if (tutorialNextBtn) {
-    tutorialNextBtn.addEventListener('click', () => {
-        if (tutorialIndex >= tutorialSteps.length - 1) {
-            closeTutorial();
-            return;
-        }
-        tutorialIndex += 1;
-        renderTutorialStep();
-    });
-}
-
-if (tutorialCloseBtn) {
-    tutorialCloseBtn.addEventListener('click', closeTutorial);
 }
 
 if (tutorialOverlay) {
