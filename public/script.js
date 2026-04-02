@@ -3,6 +3,7 @@ const socket = io();
 
 let gameState = null;
 let currentPlayerId = null;
+let myPlayerId = null; // Track which player is "me" by player ID, not socket ID
 // Track connection id when connected
 socket.on('connect', () => {
     currentPlayerId = socket.id;
@@ -22,6 +23,7 @@ const playersList = document.getElementById('playersList');
 const rollDiceBtn = document.getElementById('rollDiceBtn');
 const buyPropertyBtn = document.getElementById('buyPropertyBtn');
 const skipBuyBtn = document.getElementById('skipBuyBtn');
+const proposeTradeBtn = document.getElementById('proposeTradeBtn');
 const payJailFineBtn = document.getElementById('payJailFineBtn');
 const useJailCardBtn = document.getElementById('useJailCardBtn');
 const gameMessage = document.getElementById('gameMessage');
@@ -45,6 +47,27 @@ const tutorialCloseBtn = document.getElementById('tutorialCloseBtn');
 let tutorialSteps = [];
 let tutorialIndex = 0;
 let tutorialActive = false;
+
+// Trade Modal elements
+const tradeModal = document.getElementById('tradeModal');
+const tradeModalClose = document.getElementById('tradeModalClose');
+const tradeTarget = document.getElementById('tradeTarget');
+const offerMoney = document.getElementById('offerMoney');
+const offerProperties = document.getElementById('offerProperties');
+const requestMoney = document.getElementById('requestMoney');
+const requestProperties = document.getElementById('requestProperties');
+const tradeSubmitBtn = document.getElementById('tradeSubmitBtn');
+const tradeCancelBtn = document.getElementById('tradeCancelBtn');
+
+// Trade Response Modal elements
+const tradeResponseModal = document.getElementById('tradeResponseModal');
+const tradeProposalContent = document.getElementById('tradeProposalContent');
+const respondAsPlayer = document.getElementById('respondAsPlayer');
+const tradeAcceptBtn = document.getElementById('tradeAcceptBtn');
+const tradeRejectBtn = document.getElementById('tradeRejectBtn');
+
+let pendingTradeId = null;
+let pendingTradeTargetId = null;
 
 // Join game
 joinBtn.addEventListener('click', () => {
@@ -88,6 +111,125 @@ skipBuyBtn.addEventListener('click', () => {
     socket.emit('skipBuy');
 });
 
+// Propose trade button - open modal
+if (proposeTradeBtn) {
+    proposeTradeBtn.addEventListener('click', () => {
+        if (!gameState) return alert('No game in progress');
+
+        const others = gameState.players.filter(p => p.id !== myPlayerId);
+        if (others.length === 0) return alert('No other players to trade with');
+
+        // Populate player dropdown
+        tradeTarget.innerHTML = '<option value="">Select a player</option>';
+        others.forEach(player => {
+            const option = document.createElement('option');
+            option.value = player.id;
+            option.textContent = player.name;
+            tradeTarget.appendChild(option);
+        });
+
+        // Clear form
+        offerMoney.value = '0';
+        requestMoney.value = '0';
+        offerProperties.innerHTML = '';
+        requestProperties.innerHTML = '';
+
+        // Show modal
+        tradeModal.style.display = 'flex';
+    });
+}
+
+// Modal close handlers
+tradeModalClose.addEventListener('click', () => {
+    tradeModal.style.display = 'none';
+});
+
+tradeCancelBtn.addEventListener('click', () => {
+    tradeModal.style.display = 'none';
+});
+
+// Close modal when clicking outside of it
+tradeModal.addEventListener('click', (e) => {
+    if (e.target === tradeModal) {
+        tradeModal.style.display = 'none';
+    }
+});
+
+// When target player changes, populate available properties
+tradeTarget.addEventListener('change', () => {
+    const targetId = tradeTarget.value;
+    if (!targetId) {
+        offerProperties.innerHTML = '';
+        requestProperties.innerHTML = '';
+        return;
+    }
+
+    const me = gameState.players.find(p => p.id === myPlayerId);
+    const target = gameState.players.find(p => p.id === targetId);
+
+    // Populate my properties (offer)
+    offerProperties.innerHTML = '';
+    if (me && me.properties && me.properties.length > 0) {
+        me.properties.forEach(propId => {
+            const prop = gameState.board[propId];
+            const label = document.createElement('label');
+            label.className = 'property-checkbox';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.value = propId;
+            checkbox.dataset.player = 'me';
+            const text = document.createElement('span');
+            text.textContent = prop.name;
+            label.appendChild(checkbox);
+            label.appendChild(text);
+            offerProperties.appendChild(label);
+        });
+    } else {
+        offerProperties.innerHTML = '<div style="color: #999; font-size: 12px;">No properties owned</div>';
+    }
+
+    // Populate target properties (request)
+    requestProperties.innerHTML = '';
+    if (target && target.properties && target.properties.length > 0) {
+        target.properties.forEach(propId => {
+            const prop = gameState.board[propId];
+            const label = document.createElement('label');
+            label.className = 'property-checkbox';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.value = propId;
+            checkbox.dataset.player = 'target';
+            const text = document.createElement('span');
+            text.textContent = prop.name;
+            label.appendChild(checkbox);
+            label.appendChild(text);
+            requestProperties.appendChild(label);
+        });
+    } else {
+        requestProperties.innerHTML = '<div style="color: #999; font-size: 12px;">No properties owned</div>';
+    }
+});
+
+// Submit trade
+tradeSubmitBtn.addEventListener('click', () => {
+    const targetId = tradeTarget.value;
+    if (!targetId) return alert('Please select a player');
+
+    const offerMonetyVal = Number(offerMoney.value) || 0;
+    const requestMoneyVal = Number(requestMoney.value) || 0;
+
+    const offerPropsChecked = Array.from(offerProperties.querySelectorAll('input:checked')).map(c => Number(c.value));
+    const requestPropsChecked = Array.from(requestProperties.querySelectorAll('input:checked')).map(c => Number(c.value));
+
+    socket.emit('proposeTrade', {
+        toPlayerId: targetId,
+        offer: { money: offerMonetyVal, properties: offerPropsChecked },
+        request: { money: requestMoneyVal, properties: requestPropsChecked }
+    });
+
+    tradeModal.style.display = 'none';
+});
+
 // How to Play toggle
 if (howToPlayToggle && howToPlayContent) {
     howToPlayToggle.addEventListener('click', () => {
@@ -107,6 +249,15 @@ useJailCardBtn.addEventListener('click', () => {
 // Socket event listeners
 socket.on('gameState', (state) => {
     gameState = state;
+    
+    // Set myPlayerId when we first see a player with our socketId
+    if (!myPlayerId && gameState.players) {
+        const mePlayer = gameState.players.find(p => p.socketId === currentPlayerId);
+        if (mePlayer) {
+            myPlayerId = mePlayer.id;
+        }
+    }
+    
     updateUI();
 });
 
@@ -199,6 +350,102 @@ socket.on('usedGetOutOfJailCard', (data) => {
 socket.on('error', (message) => {
     gameMessage.textContent = `Error: ${message}`;
     console.error('Socket error:', message);
+});
+
+// Trade-related socket handlers
+socket.on('tradeProposed', (data) => {
+    const trade = data.trade;
+    const fromName = data.from?.name || 'Someone';
+    
+    pendingTradeId = trade.id;
+    pendingTradeTargetId = trade.toId;
+
+    // Build content HTML
+    let offerPropsHtml = 'None';
+    if (trade.offer.properties && trade.offer.properties.length > 0) {
+        offerPropsHtml = trade.offer.properties
+            .map(pid => gameState.board[pid]?.name || `Property #${pid}`)
+            .join(', ');
+    }
+
+    let requestPropsHtml = 'None';
+    if (trade.request.properties && trade.request.properties.length > 0) {
+        requestPropsHtml = trade.request.properties
+            .map(pid => gameState.board[pid]?.name || `Property #${pid}`)
+            .join(', ');
+    }
+
+    tradeProposalContent.innerHTML = `
+        <div style="background: #fff3cd; padding: 12px; border-radius: 6px; margin-bottom: 16px; border-left: 4px solid #ff9800;">
+            <strong style="color: #ff9800;">⚠️ To respond to this trade, select your player below (for local testing)</strong>
+        </div>
+        <strong>${fromName}</strong> is proposing a trade:<br><br>
+        <div style="margin-left: 10px; border-left: 3px solid #667eea; padding-left: 10px;">
+            <strong style="color: #667eea;">They offer:</strong><br>
+            $${trade.offer.money} and properties: ${offerPropsHtml}<br><br>
+            <strong style="color: #667eea;">They request:</strong><br>
+            $${trade.request.money} and properties: ${requestPropsHtml}
+        </div>
+    `;
+
+    // Populate player dropdown
+    respondAsPlayer.innerHTML = '<option value="">Select player to respond</option>';
+    gameState.players.forEach(player => {
+        const option = document.createElement('option');
+        option.value = player.id;
+        option.textContent = player.name;
+        respondAsPlayer.appendChild(option);
+    });
+
+    tradeResponseModal.style.display = 'flex';
+});
+
+
+socket.on('tradeProposalSent', (data) => {
+    gameMessage.textContent = 'Trade proposal sent.';
+});
+
+// Trade response modal handlers
+tradeAcceptBtn.addEventListener('click', () => {
+    if (!pendingTradeId) return;
+    const selectedPlayerId = respondAsPlayer.value;
+    if (!selectedPlayerId) return alert('Please select a player to respond as');
+    
+    socket.emit('respondTrade', { tradeId: pendingTradeId, accept: true, respondAsId: selectedPlayerId });
+    tradeResponseModal.style.display = 'none';
+    pendingTradeId = null;
+    pendingTradeTargetId = null;
+});
+
+tradeRejectBtn.addEventListener('click', () => {
+    if (!pendingTradeId) return;
+    const selectedPlayerId = respondAsPlayer.value;
+    if (!selectedPlayerId) return alert('Please select a player to respond as');
+    
+    socket.emit('respondTrade', { tradeId: pendingTradeId, accept: false, respondAsId: selectedPlayerId });
+    tradeResponseModal.style.display = 'none';
+    pendingTradeId = null;
+    pendingTradeTargetId = null;
+});
+
+
+socket.on('tradeExecuted', (data) => {
+    gameMessage.textContent = 'Trade executed.';
+    updateUI();
+});
+
+socket.on('tradeDeclined', (data) => {
+    gameMessage.textContent = 'Trade declined.';
+});
+
+socket.on('tradeError', (msg) => {
+    gameMessage.textContent = `Trade error: ${msg}`;
+    console.error('Trade error:', msg);
+});
+
+socket.on('tradeNotification', (data) => {
+    gameMessage.textContent = data.message || 'Trade update';
+    updateUI();
 });
 
 socket.on('buildingBought', (data) => {

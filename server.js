@@ -24,6 +24,8 @@ let gameState = {
   gamePhase: 'waiting', // waiting, rolling, moving, buying, ended
   pendingExtraTurn: false
 };
+// Pending trades: array of { id, fromId, toId, offer: { money, properties }, request: { money, properties }, timestamp }
+gameState.pendingTrades = [];
 
 function createPlayerId() {
   return `p_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
@@ -963,6 +965,153 @@ io.on('connection', (socket) => {
       hotel: !!property.hotel
     });
 
+    broadcastGameState();
+  });
+
+  // Handle trade proposals
+  socket.on('proposeTrade', (trade) => {
+    // trade: { toPlayerId, offer: { money, properties }, request: { money, properties } }
+    const proposer = gameState.players.find(p => p.socketId === socket.id);
+    if (!proposer) {
+      socket.emit('tradeError', 'You must be in the game to propose trades');
+      return;
+    }
+
+    const target = gameState.players.find(p => p.id === trade.toPlayerId);
+    if (!target) {
+      socket.emit('tradeError', 'Target player not found');
+      return;
+    }
+
+    const tradeId = `t_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+    const pending = {
+      id: tradeId,
+      fromId: proposer.id,
+      toId: target.id,
+      offer: {
+        money: Number(trade.offer?.money) || 0,
+        properties: Array.isArray(trade.offer?.properties) ? trade.offer.properties.map(Number) : []
+      },
+      request: {
+        money: Number(trade.request?.money) || 0,
+        properties: Array.isArray(trade.request?.properties) ? trade.request.properties.map(Number) : []
+      },
+      timestamp: Date.now()
+    };
+
+    gameState.pendingTrades = gameState.pendingTrades || [];
+    gameState.pendingTrades.push(pending);
+
+    // Notify the target player of the proposal
+    if (target.socketId) {
+      io.to(target.socketId).emit('tradeProposed', {
+        trade: pending,
+        from: { id: proposer.id, name: proposer.name }
+      });
+    }
+
+    // Acknowledge proposer
+    socket.emit('tradeProposalSent', { tradeId });
+    broadcastGameState();
+  });
+
+  // Handle responses to trades (accept or decline)
+  socket.on('respondTrade', ({ tradeId, accept, respondAsId }) => {
+    // If respondAsId provided (for local testing), use that; otherwise use socket connection
+    const responder = respondAsId 
+      ? gameState.players.find(p => p.id === respondAsId)
+      : gameState.players.find(p => p.socketId === socket.id);
+    
+    if (!responder) {
+      socket.emit('tradeError', 'Player not found');
+      return;
+    }
+
+    gameState.pendingTrades = gameState.pendingTrades || [];
+    const idx = gameState.pendingTrades.findIndex(t => t.id === tradeId);
+    if (idx === -1) {
+      socket.emit('tradeError', 'Trade not found or already handled');
+      return;
+    }
+
+    const pending = gameState.pendingTrades[idx];
+    const proposer = gameState.players.find(p => p.id === pending.fromId);
+    const target = gameState.players.find(p => p.id === pending.toId);
+
+    // Only the intended recipient may respond
+    if (responder.id !== pending.toId) {
+      socket.emit('tradeError', 'Only the target player can respond to this trade');
+      return;
+    }
+
+    // Remove pending trade regardless of outcome
+    gameState.pendingTrades.splice(idx, 1);
+
+    if (!accept) {
+      // Notify both parties
+      if (proposer?.socketId) io.to(proposer.socketId).emit('tradeDeclined', { tradeId, by: responder.id });
+      if (target?.socketId) io.to(target.socketId).emit('tradeDeclined', { tradeId, by: responder.id });
+      broadcastGameState();
+      return;
+    }
+
+    // Validate that properties and funds are still available
+    const offerProps = pending.offer.properties || [];
+    const requestProps = pending.request.properties || [];
+
+    // Check ownership
+    const proposerStillOwns = offerProps.every(pid => proposer.properties.includes(pid));
+    const targetStillOwns = requestProps.every(pid => target.properties.includes(pid));
+
+    if (!proposerStillOwns || !targetStillOwns) {
+      const msg = 'One or more properties are no longer owned by the proposing players';
+      if (proposer?.socketId) io.to(proposer.socketId).emit('tradeError', msg);
+      if (target?.socketId) io.to(target.socketId).emit('tradeError', msg);
+      broadcastGameState();
+      return;
+    }
+
+    // Check funds
+    if (proposer.money < pending.offer.money || target.money < pending.request.money) {
+      const msg = 'One or both players lack sufficient funds for the proposed cash exchange';
+      if (proposer?.socketId) io.to(proposer.socketId).emit('tradeError', msg);
+      if (target?.socketId) io.to(target.socketId).emit('tradeError', msg);
+      broadcastGameState();
+      return;
+    }
+
+    // Execute property transfers
+    offerProps.forEach(pid => {
+      // remove from proposer
+      proposer.properties = proposer.properties.filter(id => id !== pid);
+      // assign to target
+      target.properties.push(pid);
+      const space = gameState.board[Number(pid)];
+      if (space) space.owner = target.id;
+    });
+
+    requestProps.forEach(pid => {
+      target.properties = target.properties.filter(id => id !== pid);
+      proposer.properties.push(pid);
+      const space = gameState.board[Number(pid)];
+      if (space) space.owner = proposer.id;
+    });
+
+    // Execute money transfers (offer.money goes from proposer -> target, request.money goes from target -> proposer)
+    const offerMoney = Number(pending.offer.money) || 0;
+    const requestMoney = Number(pending.request.money) || 0;
+
+    proposer.money -= offerMoney;
+    target.money += offerMoney;
+
+    target.money -= requestMoney;
+    proposer.money += requestMoney;
+
+    // Notify participants and broadcast new game state
+    if (proposer?.socketId) io.to(proposer.socketId).emit('tradeExecuted', { tradeId, with: target.id, details: pending });
+    if (target?.socketId) io.to(target.socketId).emit('tradeExecuted', { tradeId, with: proposer.id, details: pending });
+
+    io.emit('tradeNotification', { message: `${proposer.name} and ${target.name} completed a trade.` });
     broadcastGameState();
   });
 
