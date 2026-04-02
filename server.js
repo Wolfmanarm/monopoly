@@ -440,6 +440,107 @@ function buildOnProperty(property) {
   return 'hotel';
 }
 
+function declareBankruptcy(player, creditorId = null, reason = '') {
+  const bankruptIndex = gameState.players.findIndex(p => p.id === player.id);
+  if (bankruptIndex === -1) return;
+
+  const creditor = creditorId
+    ? gameState.players.find(p => p.id === creditorId)
+    : null;
+
+  const transferredProperties = [...(player.properties || [])];
+
+  // Transfer remaining cash
+  if (creditor) {
+    if (player.money > 0) {
+      creditor.money += player.money;
+    }
+
+    transferredProperties.forEach((propertyId) => {
+      const space = gameState.board[propertyId];
+      if (!space) return;
+
+      space.owner = creditor.id;
+
+      if (!creditor.properties.includes(propertyId)) {
+        creditor.properties.push(propertyId);
+      }
+    });
+  } else {
+    // Bankruptcy to the bank:
+    // reset property ownership and clear buildings
+    transferredProperties.forEach((propertyId) => {
+      const space = gameState.board[propertyId];
+      if (!space) return;
+
+      space.owner = null;
+
+      if (space.type === 'property') {
+        space.houses = 0;
+        space.hotel = false;
+      }
+    });
+  }
+
+  // Clear player's property list and money
+  player.properties = [];
+  player.money = 0;
+
+  // Remove pending rent if this player was part of it
+  if (
+    gameState.pendingRent &&
+    (
+      gameState.pendingRent.payerId === player.id ||
+      gameState.pendingRent.ownerId === player.id
+    )
+  ) {
+    delete gameState.pendingRent;
+  }
+
+  // Remove any pending trades involving this player
+  gameState.pendingTrades = (gameState.pendingTrades || []).filter(trade =>
+    trade.fromId !== player.id && trade.toId !== player.id
+  );
+
+  // Remove player from game
+  gameState.players.splice(bankruptIndex, 1);
+
+  // Fix current player index
+  if (gameState.players.length === 0) {
+    gameState.currentPlayerIndex = 0;
+    gameState.gameStarted = false;
+    gameState.gamePhase = 'waiting';
+  } else {
+    if (bankruptIndex < gameState.currentPlayerIndex) {
+      gameState.currentPlayerIndex -= 1;
+    } else if (gameState.currentPlayerIndex >= gameState.players.length) {
+      gameState.currentPlayerIndex = 0;
+    }
+  }
+
+  io.emit('playerBankrupt', {
+    playerId: player.id,
+    playerName: player.name,
+    creditorId: creditor ? creditor.id : null,
+    creditorName: creditor ? creditor.name : null,
+    reason,
+    transferredProperties
+  });
+
+  // Check win condition
+  if (gameState.players.length === 1 && gameState.gameStarted) {
+    gameState.gamePhase = 'ended';
+    io.emit('gameOver', {
+      winnerId: gameState.players[0].id,
+      winnerName: gameState.players[0].name
+    });
+  } else if (gameState.players.length > 1) {
+    gameState.gamePhase = 'rolling';
+  }
+
+  broadcastGameState();
+}
+
 
 function drawRandomCard(cards) {
   const index = Math.floor(Math.random() * cards.length);
@@ -651,9 +752,15 @@ io.on('connection', (socket) => {
 
         // Third failed attempt: pay $50 and move using this roll
         if (currentPlayer.jailTurns >= 3) {
+          if (currentPlayer.money < 50) {
+            declareBankruptcy(currentPlayer, null, 'Could not pay third failed jail fine');
+            return;
+          }
+
           currentPlayer.money -= 50;
           currentPlayer.inJail = false;
           currentPlayer.jailTurns = 0;
+
           io.emit('diceRolled', {
             playerId: currentPlayer.id,
             playerName: currentPlayer.name,
@@ -782,7 +889,7 @@ io.on('connection', (socket) => {
       gameState.gamePhase = 'waiting';
     }
 
-    // Broadcast dice result and game state
+    // Broadcast dice result
     io.emit('diceRolled', {
       playerId: currentPlayer.id,
       playerName: currentPlayer.name,
@@ -795,6 +902,16 @@ io.on('connection', (socket) => {
       result: result,
       postCardResult: postCardResult
     });
+
+    // If player went negative from tax / cards / other bank debt, bankrupt to bank
+    if (finalResult.action !== 'rentDue' && currentPlayer.money < 0) {
+      declareBankruptcy(
+        currentPlayer,
+        null,
+        `Could not cover ${finalResult.action}`
+      );
+      return;
+    }
 
     broadcastGameState();
 
@@ -848,12 +965,18 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // Check funds
     if (payer.money < pending.rent) {
-      console.log(`Payer ${payer.id} has insufficient funds: ${payer.money} < ${pending.rent}`);
-      // Still allow negative balance for now, but notify
-      socket.emit('error', 'Not enough money to fully pay rent (will allow negative balance)');
+      declareBankruptcy(
+        payer,
+        owner.id,
+        `Could not pay $${pending.rent} rent for ${pending.propertyName}`
+      );
+      return;
     }
+
+// Process payment
+payer.money -= pending.rent;
+owner.money += pending.rent;
 
     // Process payment
     payer.money -= pending.rent;
@@ -913,6 +1036,11 @@ io.on('connection', (socket) => {
 
     if (currentPlayer.hasPaidJailFine) {
       socket.emit('error', 'Jail fine already paid this turn');
+      return;
+    }
+
+    if (currentPlayer.money < 50) {
+      declareBankruptcy(currentPlayer, null, 'Could not pay jail fine');
       return;
     }
 
@@ -1240,8 +1368,10 @@ io.on('connection', (socket) => {
       gameState.gameStarted = false;
       gameState.currentPlayerIndex = 0;
       gameState.gamePhase = 'waiting';
-      // Reset board ownership
+      delete gameState.pendingRent;
+      gameState.pendingTrades = [];
       gameState.board = createInitialBoard();
+
     } else {
       // Adjust current player index if needed
       if (gameState.currentPlayerIndex >= gameState.players.length) {

@@ -97,4 +97,21 @@ export function registerDevTools(io, socket, gameState, helpers = {}) {
     player.position = numericPosition;
     broadcastGameState();
   });
+
+    socket.on('devSetMoney', (amount) => {
+    const player = gameState.players.find(p => p.socketId === socket.id);
+    if (!player) {
+      socket.emit('error', 'Player not found');
+      return;
+    }
+
+    const numericAmount = Number(amount);
+    if (!Number.isFinite(numericAmount)) {
+      socket.emit('error', 'Invalid money amount');
+      return;
+    }
+
+    player.money = numericAmount;
+    broadcastGameState();
+  });
 }

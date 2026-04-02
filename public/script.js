@@ -955,6 +955,22 @@ socket.on('tradeNotification', (data) => {
     updateUI();
 });
 
+socket.on('playerBankrupt', (data) => {
+  if (data.creditorName) {
+    gameMessage.textContent = `${data.playerName} went bankrupt and transferred all assets to ${data.creditorName}.`;
+  } else {
+    gameMessage.textContent = `${data.playerName} went bankrupt to the bank.`;
+  }
+  updateUI();
+});
+
+socket.on('gameOver', (data) => {
+  gameMessage.textContent = `Game Over! ${data.winnerName} wins!`;
+  gameStatus.textContent = 'Game Over';
+  controlsTurnStatus.textContent = 'Game Over';
+  updateUI();
+});
+
 // Log unhandled promise rejections to help debug extension vs app issues
 window.addEventListener('unhandledrejection', (e) => {
     console.error('Unhandled promise rejection:', e.reason, e);
@@ -991,6 +1007,15 @@ function updateUI() {
     updateControls();
 
     // Update game status
+    if (gameState.gamePhase === 'ended' && gameState.players.length === 1) {
+        const winner = gameState.players[0];
+        gameStatus.textContent = `${winner.name} Wins!`;
+        gameStatus.style.color = winner.color;
+        controlsTurnStatus.textContent = 'Game Over';
+        controlsTurnStatus.style.color = winner.color;
+        return;
+    }
+
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     if (currentPlayer) {
         gameStatus.textContent = `${currentPlayer.name}'s Turn`;
