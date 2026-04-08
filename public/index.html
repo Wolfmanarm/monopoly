@@ -122,7 +122,14 @@
             <div id="saveGameMessage" class="save-game-message"></div>
         </div>
     </div>
+    // in-chat box
+    <div id="chatBox" style="height:150px;overflow:auto;background:#fff;border-radius:8px;padding:8px;"></div>
+    <input id="chatInput" placeholder="Type..." />
+    <button onclick="sendChat()">Send</button>
 
+    <button onclick="saveGame()">Save Game</button>
+    <div id="saveList"></div>
+    
     <script src="script.js"></script>
 </body>
 </html>
