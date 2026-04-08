@@ -25,7 +25,7 @@ export async function initDb() {
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
-      game_data TEXT NOT NULL,
+      game_data JSONB NOT NULL,
       saved_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
