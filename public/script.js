@@ -3,6 +3,7 @@ const socket = io();
 
 let gameState = null;
 let currentPlayerId = null;
+let myPlayerId = null;
 let currentUser = null; // { id, username } when logged in, null otherwise
 let hasLoggedOut = false; // true after explicit logout, prevents game screen from reappearing
 
@@ -23,19 +24,156 @@ const playerList = document.getElementById('playerList');
 const gameBoard = document.getElementById('gameBoard');
 const playersList = document.getElementById('playersList');
 const rollDiceBtn = document.getElementById('rollDiceBtn');
+const payRentBtn = document.getElementById('payRentBtn');
 const buyPropertyBtn = document.getElementById('buyPropertyBtn');
 const skipBuyBtn = document.getElementById('skipBuyBtn');
+let proposeTradeBtn = document.getElementById('proposeTradeBtn');
 const payJailFineBtn = document.getElementById('payJailFineBtn');
 const useJailCardBtn = document.getElementById('useJailCardBtn');
 const gameMessage = document.getElementById('gameMessage');
 const gameStatus = document.getElementById('gameStatus');
 const controlsTurnStatus = document.getElementById('controlsTurnStatus');
 const diceDisplay = document.getElementById('diceDisplay');
+const buildingControls = document.getElementById('buildingControls');
 const howToPlayToggle = document.getElementById('howToPlayToggle');
 const howToPlayContent = document.getElementById('howToPlayContent');
+let lobbyTutorialBtn = document.getElementById('lobbyTutorialBtn');
+let gameTutorialBtn = document.getElementById('gameTutorialBtn');
+const tutorialOverlay = document.getElementById('tutorialOverlay');
+const tutorialCard = document.getElementById('tutorialCard');
+const tutorialStepCounter = document.getElementById('tutorialStepCounter');
+const tutorialTitle = document.getElementById('tutorialTitle');
+const tutorialText = document.getElementById('tutorialText');
+const tutorialPrevBtn = document.getElementById('tutorialPrevBtn');
+const tutorialNextBtn = document.getElementById('tutorialNextBtn');
+const tutorialCloseBtn = document.getElementById('tutorialCloseBtn');
 const saveGameBtn = document.getElementById('saveGameBtn');
 const gameLogoutBtn = document.getElementById('gameLogoutBtn');
 const saveGameMessage = document.getElementById('saveGameMessage');
+
+// Trade Modal elements
+const tradeModal = document.getElementById('tradeModal');
+const tradeModalClose = document.getElementById('tradeModalClose');
+const tradeTarget = document.getElementById('tradeTarget');
+const offerMoney = document.getElementById('offerMoney');
+const offerProperties = document.getElementById('offerProperties');
+const requestMoney = document.getElementById('requestMoney');
+const requestProperties = document.getElementById('requestProperties');
+const tradeSubmitBtn = document.getElementById('tradeSubmitBtn');
+const tradeCancelBtn = document.getElementById('tradeCancelBtn');
+
+// Trade response modal elements
+const tradeResponseModal = document.getElementById('tradeResponseModal');
+const tradeProposalContent = document.getElementById('tradeProposalContent');
+const respondAsPlayer = document.getElementById('respondAsPlayer');
+const tradeAcceptBtn = document.getElementById('tradeAcceptBtn');
+const tradeRejectBtn = document.getElementById('tradeRejectBtn');
+
+let pendingTradeId = null;
+let tutorialSteps = [];
+let tutorialIndex = 0;
+let tutorialActive = false;
+let tradeHandlersBound = false;
+
+const TRADE_REQUIRED_IDS = [
+    'tradeModal',
+    'tradeModalClose',
+    'tradeTarget',
+    'offerMoney',
+    'offerProperties',
+    'requestMoney',
+    'requestProperties',
+    'tradeSubmitBtn',
+    'tradeCancelBtn',
+    'tradeResponseModal',
+    'tradeProposalContent',
+    'respondAsPlayer',
+    'tradeAcceptBtn',
+    'tradeRejectBtn'
+];
+
+function ensureTradeAndTutorialContainers() {
+    const gameEl = document.getElementById('game');
+    const hasAllTradeNodes = TRADE_REQUIRED_IDS.every((id) => !!document.getElementById(id));
+   
+}
+
+function getTradeDom() {
+    ensureTradeAndTutorialContainers();
+    return {
+        tradeModal: document.getElementById('tradeModal'),
+        tradeModalClose: document.getElementById('tradeModalClose'),
+        tradeTarget: document.getElementById('tradeTarget'),
+        offerMoney: document.getElementById('offerMoney'),
+        offerProperties: document.getElementById('offerProperties'),
+        requestMoney: document.getElementById('requestMoney'),
+        requestProperties: document.getElementById('requestProperties'),
+        tradeSubmitBtn: document.getElementById('tradeSubmitBtn'),
+        tradeCancelBtn: document.getElementById('tradeCancelBtn'),
+        tradeResponseModal: document.getElementById('tradeResponseModal'),
+        tradeProposalContent: document.getElementById('tradeProposalContent'),
+        respondAsPlayer: document.getElementById('respondAsPlayer'),
+    };
+}
+
+function ensureFeatureButtonsVisible() {
+    if (!lobbyTutorialBtn) {
+        const lobbyContainer = document.querySelector('#lobby .lobby-container');
+        if (lobbyContainer) {
+            const btn = document.createElement('button');
+            btn.id = 'lobbyTutorialBtn';
+            btn.className = 'start-btn';
+            btn.style.marginTop = '10px';
+            btn.textContent = 'Start Tutorial';
+            lobbyContainer.appendChild(btn);
+            lobbyTutorialBtn = btn;
+        }
+    }
+
+    if (!proposeTradeBtn) {
+        const controlsPanel = document.querySelector('.controls-panel');
+        const anchor = document.getElementById('skipBuyBtn');
+        if (controlsPanel) {
+            const btn = document.createElement('button');
+            btn.id = 'proposeTradeBtn';
+            btn.className = 'action-btn';
+            btn.textContent = 'Propose Trade';
+            if (anchor && anchor.parentElement === controlsPanel) {
+                anchor.insertAdjacentElement('afterend', btn);
+            } else {
+                controlsPanel.appendChild(btn);
+            }
+            proposeTradeBtn = btn;
+        }
+    }
+
+    if (!gameTutorialBtn) {
+        const howToPlayContainer = document.querySelector('.how-to-play-container');
+        if (howToPlayContainer) {
+            const btn = document.createElement('button');
+            btn.id = 'gameTutorialBtn';
+            btn.className = 'action-btn secondary how-to-play-button';
+            btn.style.marginTop = '10px';
+            btn.textContent = 'Guided Tutorial';
+            const howToPlayContentEl = document.getElementById('howToPlayContent');
+            if (howToPlayContentEl) {
+                howToPlayContentEl.insertAdjacentElement('beforebegin', btn);
+            } else {
+                howToPlayContainer.appendChild(btn);
+            }
+            gameTutorialBtn = btn;
+        }
+    }
+
+    if (lobbyTutorialBtn) lobbyTutorialBtn.style.display = 'inline-block';
+    if (proposeTradeBtn) proposeTradeBtn.style.display = 'inline-block';
+    if (gameTutorialBtn) gameTutorialBtn.style.display = 'block';
+
+    // If any trade node was rebuilt, ensure handlers are present on the current DOM nodes.
+    bindTradeHandlers();
+}
+
+ensureFeatureButtonsVisible();
 
 // Join game
 joinBtn.addEventListener('click', () => {
@@ -79,6 +217,228 @@ skipBuyBtn.addEventListener('click', () => {
     socket.emit('skipBuy');
 });
 
+if (payRentBtn) {
+    payRentBtn.addEventListener('click', () => {
+        if (!gameState || gameState.gamePhase !== 'payingRent' || !gameState.pendingRent) return;
+        socket.emit('payRent');
+        payRentBtn.disabled = true;
+        gameMessage.textContent = 'Paying rent...';
+    });
+}
+
+function openTradeModal() {
+    const {
+        tradeModal,
+        tradeTarget,
+        offerMoney,
+        offerProperties,
+        requestMoney,
+        requestProperties,
+    } = getTradeDom();
+
+    if (!tradeModal || !tradeTarget || !offerMoney || !requestMoney || !offerProperties || !requestProperties) {
+        if (gameMessage) gameMessage.textContent = 'Trade UI is missing. Please refresh the page.';
+        return;
+    }
+
+    if (!gameState) {
+        gameMessage.textContent = 'Join and start a game first.';
+        return;
+    }
+
+    const others = gameState.players.filter(p => p.id !== myPlayerId);
+    if (others.length === 0) {
+        alert('No other players to trade with');
+        return;
+    }
+
+    tradeTarget.innerHTML = '<option value="">Select a player</option>';
+    others.forEach((player) => {
+        const option = document.createElement('option');
+        option.value = player.id;
+        option.textContent = player.name;
+        tradeTarget.appendChild(option);
+    });
+
+    offerMoney.value = '0';
+    requestMoney.value = '0';
+    offerProperties.innerHTML = '';
+    requestProperties.innerHTML = '';
+    tradeModal.style.display = 'flex';
+}
+
+function bindTradeHandlers() {
+    if (tradeHandlersBound) return;
+    const {
+        tradeModal,
+        tradeModalClose,
+        tradeTarget,
+        offerMoney,
+        offerProperties,
+        requestMoney,
+        requestProperties,
+        tradeSubmitBtn,
+        tradeCancelBtn,
+    } = getTradeDom();
+    if (!tradeModal || !tradeTarget || !offerMoney || !requestMoney || !offerProperties || !requestProperties || !tradeSubmitBtn || !tradeCancelBtn) return;
+
+    tradeHandlersBound = true;
+
+    tradeModalClose?.addEventListener('click', () => {
+        tradeModal.style.display = 'none';
+    });
+
+    tradeCancelBtn.addEventListener('click', () => {
+        tradeModal.style.display = 'none';
+    });
+
+    tradeModal.addEventListener('click', (e) => {
+        if (e.target === tradeModal) {
+            tradeModal.style.display = 'none';
+        }
+    });
+
+    tradeTarget.addEventListener('change', () => {
+        const targetId = tradeTarget.value;
+        if (!targetId) {
+            offerProperties.innerHTML = '';
+            requestProperties.innerHTML = '';
+            return;
+        }
+
+        const me = gameState.players.find(p => p.id === myPlayerId);
+        const target = gameState.players.find(p => p.id === targetId);
+
+        offerProperties.innerHTML = '';
+        if (me && Array.isArray(me.properties) && me.properties.length > 0) {
+            me.properties.forEach((propId) => {
+                const prop = gameState.board[propId];
+                if (!prop) return;
+                const label = document.createElement('label');
+                label.className = 'property-checkbox';
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.value = String(propId);
+                const text = document.createElement('span');
+                text.textContent = prop.name;
+                label.appendChild(checkbox);
+                label.appendChild(text);
+                offerProperties.appendChild(label);
+            });
+        } else {
+            offerProperties.innerHTML = '<div style="color: #999; font-size: 12px;">No properties owned</div>';
+        }
+
+        requestProperties.innerHTML = '';
+        if (target && Array.isArray(target.properties) && target.properties.length > 0) {
+            target.properties.forEach((propId) => {
+                const prop = gameState.board[propId];
+                if (!prop) return;
+                const label = document.createElement('label');
+                label.className = 'property-checkbox';
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.value = String(propId);
+                const text = document.createElement('span');
+                text.textContent = prop.name;
+                label.appendChild(checkbox);
+                label.appendChild(text);
+                requestProperties.appendChild(label);
+            });
+        } else {
+            requestProperties.innerHTML = '<div style="color: #999; font-size: 12px;">No properties owned</div>';
+        }
+    });
+
+    tradeSubmitBtn.addEventListener('click', () => {
+        const targetId = tradeTarget.value;
+        if (!targetId) {
+            alert('Please select a player');
+            return;
+        }
+
+        const offerMoneyVal = Number(offerMoney.value) || 0;
+        const requestMoneyVal = Number(requestMoney.value) || 0;
+        const offerPropsChecked = Array.from(offerProperties.querySelectorAll('input:checked')).map(c => Number(c.value));
+        const requestPropsChecked = Array.from(requestProperties.querySelectorAll('input:checked')).map(c => Number(c.value));
+
+        socket.emit('proposeTrade', {
+            toPlayerId: targetId,
+            offer: { money: offerMoneyVal, properties: offerPropsChecked },
+            request: { money: requestMoneyVal, properties: requestPropsChecked }
+        });
+
+        tradeModal.style.display = 'none';
+    });
+}
+
+bindTradeHandlers();
+
+document.addEventListener('click', (e) => {
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+
+    const clickedTradeBtn = target.closest('#proposeTradeBtn');
+    if (clickedTradeBtn) {
+        e.preventDefault();
+        bindTradeHandlers();
+        openTradeModal();
+        return;
+    }
+
+    const clickedTutorialBtn = target.closest('#lobbyTutorialBtn, #gameTutorialBtn');
+    if (clickedTutorialBtn) {
+        e.preventDefault();
+        startTutorial();
+        const overlay = document.getElementById('tutorialOverlay');
+        if (!overlay || overlay.style.display === 'none') {
+            if (gameMessage) {
+                gameMessage.textContent = 'Tutorial could not open. Please refresh and try again.';
+            }
+        }
+        return;
+    }
+
+    const clickedTradeRespond = target.closest('#tradeAcceptBtn, #tradeRejectBtn');
+    if (clickedTradeRespond) {
+        const { respondAsPlayer, tradeResponseModal } = getTradeDom();
+        if (!pendingTradeId || !respondAsPlayer || !tradeResponseModal) return;
+        const selectedPlayerId = respondAsPlayer.value;
+        if (!selectedPlayerId) {
+            alert('Please select a player to respond as');
+            return;
+        }
+        const accept = clickedTradeRespond.id === 'tradeAcceptBtn';
+        socket.emit('respondTrade', { tradeId: pendingTradeId, accept, respondAsId: selectedPlayerId });
+        tradeResponseModal.style.display = 'none';
+        pendingTradeId = null;
+        return;
+    }
+
+    const clickedTutorialNav = target.closest('#tutorialPrevBtn, #tutorialNextBtn, #tutorialCloseBtn');
+    if (clickedTutorialNav) {
+        if (clickedTutorialNav.id === 'tutorialCloseBtn') {
+            closeTutorial();
+            return;
+        }
+        if (clickedTutorialNav.id === 'tutorialPrevBtn') {
+            if (tutorialIndex > 0) {
+                tutorialIndex -= 1;
+                renderTutorialStep();
+            }
+            return;
+        }
+        if (clickedTutorialNav.id === 'tutorialNextBtn') {
+            if (tutorialIndex >= tutorialSteps.length - 1) {
+                closeTutorial();
+            } else {
+                tutorialIndex += 1;
+                renderTutorialStep();
+            }
+        }
+    }
+});
+
 // How to Play toggle
 if (howToPlayToggle && howToPlayContent) {
     howToPlayToggle.addEventListener('click', () => {
@@ -108,6 +468,7 @@ const authMessage = document.getElementById('authMessage');
 const savedGamesList = document.getElementById('savedGamesList');
 
 function showAuthMessage(msg, isError) {
+    if (!authMessage) return;
     authMessage.textContent = msg;
     authMessage.style.color = isError ? '#c0392b' : '#27ae60';
 }
@@ -115,9 +476,9 @@ function showAuthMessage(msg, isError) {
 function setLoggedIn(user) {
     hasLoggedOut = false;
     currentUser = user;
-    authForms.style.display = 'none';
-    loggedInSection.style.display = 'block';
-    loggedInName.textContent = user.username;
+    if (authForms) authForms.style.display = 'none';
+    if (loggedInSection) loggedInSection.style.display = 'block';
+    if (loggedInName) loggedInName.textContent = user.username;
     if (saveGameBtn) saveGameBtn.style.display = 'block';
     if (gameLogoutBtn) gameLogoutBtn.style.display = 'block';
     loadSavedGames();
@@ -126,8 +487,8 @@ function setLoggedIn(user) {
 function setLoggedOut() {
     hasLoggedOut = true;
     currentUser = null;
-    authForms.style.display = 'block';
-    loggedInSection.style.display = 'none';
+    if (authForms) authForms.style.display = 'block';
+    if (loggedInSection) loggedInSection.style.display = 'none';
     if (saveGameBtn) saveGameBtn.style.display = 'none';
     if (gameLogoutBtn) gameLogoutBtn.style.display = 'none';
     if (savedGamesList) savedGamesList.innerHTML = '';
@@ -142,65 +503,82 @@ fetch('/api/me')
     .catch(() => {});
 
 // Tab switching
-showLoginTab.addEventListener('click', () => {
-    loginTab.style.display = 'block';
-    registerTab.style.display = 'none';
-    showLoginTab.classList.add('auth-tab-active');
-    showRegisterTab.classList.remove('auth-tab-active');
-    authMessage.textContent = '';
-});
+if (showLoginTab && loginTab && registerTab && showRegisterTab) {
+    showLoginTab.addEventListener('click', () => {
+        loginTab.style.display = 'block';
+        registerTab.style.display = 'none';
+        showLoginTab.classList.add('auth-tab-active');
+        showRegisterTab.classList.remove('auth-tab-active');
+        if (authMessage) authMessage.textContent = '';
+    });
+}
 
-showRegisterTab.addEventListener('click', () => {
-    loginTab.style.display = 'none';
-    registerTab.style.display = 'block';
-    showRegisterTab.classList.add('auth-tab-active');
-    showLoginTab.classList.remove('auth-tab-active');
-    authMessage.textContent = '';
-});
+if (showRegisterTab && loginTab && registerTab && showLoginTab) {
+    showRegisterTab.addEventListener('click', () => {
+        loginTab.style.display = 'none';
+        registerTab.style.display = 'block';
+        showRegisterTab.classList.add('auth-tab-active');
+        showLoginTab.classList.remove('auth-tab-active');
+        if (authMessage) authMessage.textContent = '';
+    });
+}
 
 // Login
-document.getElementById('loginBtn').addEventListener('click', async () => {
-    const username = document.getElementById('loginUsername').value.trim();
-    const password = document.getElementById('loginPassword').value;
-    if (!username || !password) { showAuthMessage('Enter username and password', true); return; }
-    try {
-        const res = await fetch('/api/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password })
-        });
-        const data = await res.json();
-        if (!res.ok) { showAuthMessage(data.error, true); return; }
-        setLoggedIn(data);
-        document.getElementById('loginUsername').value = '';
-        document.getElementById('loginPassword').value = '';
-    } catch { showAuthMessage('Login failed', true); }
-});
+const loginBtn = document.getElementById('loginBtn');
+const loginUsername = document.getElementById('loginUsername');
+const loginPassword = document.getElementById('loginPassword');
+if (loginBtn && loginUsername && loginPassword) {
+    loginBtn.addEventListener('click', async () => {
+        const username = loginUsername.value.trim();
+        const password = loginPassword.value;
+        if (!username || !password) { showAuthMessage('Enter username and password', true); return; }
+        try {
+            const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+            const data = await res.json();
+            if (!res.ok) { showAuthMessage(data.error, true); return; }
+            setLoggedIn(data);
+            loginUsername.value = '';
+            loginPassword.value = '';
+        } catch { showAuthMessage('Login failed', true); }
+    });
+}
 
 // Register
-document.getElementById('registerBtn').addEventListener('click', async () => {
-    const username = document.getElementById('regUsername').value.trim();
-    const password = document.getElementById('regPassword').value;
-    if (!username || !password) { showAuthMessage('Enter username and password', true); return; }
-    try {
-        const res = await fetch('/api/register', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password })
-        });
-        const data = await res.json();
-        if (!res.ok) { showAuthMessage(data.error, true); return; }
-        setLoggedIn(data);
-        document.getElementById('regUsername').value = '';
-        document.getElementById('regPassword').value = '';
-    } catch { showAuthMessage('Registration failed', true); }
-});
+const registerBtn = document.getElementById('registerBtn');
+const regUsername = document.getElementById('regUsername');
+const regPassword = document.getElementById('regPassword');
+if (registerBtn && regUsername && regPassword) {
+    registerBtn.addEventListener('click', async () => {
+        const username = regUsername.value.trim();
+        const password = regPassword.value;
+        if (!username || !password) { showAuthMessage('Enter username and password', true); return; }
+        try {
+            const res = await fetch('/api/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+            const data = await res.json();
+            if (!res.ok) { showAuthMessage(data.error, true); return; }
+            setLoggedIn(data);
+            regUsername.value = '';
+            regPassword.value = '';
+        } catch { showAuthMessage('Registration failed', true); }
+    });
+}
 
 // Logout
-document.getElementById('logoutBtn').addEventListener('click', async () => {
-    await fetch('/api/logout', { method: 'POST' });
-    setLoggedOut();
-});
+const logoutBtn = document.getElementById('logoutBtn');
+if (logoutBtn) {
+    logoutBtn.addEventListener('click', async () => {
+        await fetch('/api/logout', { method: 'POST' });
+        setLoggedOut();
+    });
+}
 
 // Game screen logout button
 if (gameLogoutBtn) {
@@ -211,10 +589,13 @@ if (gameLogoutBtn) {
 }
 
 // Refresh saves button
-document.getElementById('refreshSavesBtn').addEventListener('click', loadSavedGames);
+const refreshSavesBtn = document.getElementById('refreshSavesBtn');
+if (refreshSavesBtn) {
+    refreshSavesBtn.addEventListener('click', loadSavedGames);
+}
 
 async function loadSavedGames() {
-    if (!currentUser) return;
+    if (!currentUser || !savedGamesList) return;
     try {
         const res = await fetch('/api/saved-games');
         if (!res.ok) return;
@@ -304,6 +685,8 @@ if (saveGameBtn) {
 // Socket event listeners
 socket.on('gameState', (state) => {
     gameState = state;
+    const me = gameState?.players?.find(p => p.socketId === socket.id);
+    if (me) myPlayerId = me.id;
     updateUI();
 });
 
@@ -383,6 +766,12 @@ socket.on('propertyBought', (data) => {
     updateUI();
 });
 
+socket.on('buildingBought', (data) => {
+    const label = data.buildingType === 'hotel' ? 'a hotel' : 'a house';
+    gameMessage.textContent = `${data.playerName} built ${label} on ${data.propertyName} for $${data.cost}`;
+    updateUI();
+});
+
 socket.on('jailFinePaid', (data) => {
     gameMessage.textContent = `${data.playerName} paid $${data.amount} to get out of jail and may roll now.`;
     updateUI();
@@ -396,6 +785,119 @@ socket.on('usedGetOutOfJailCard', (data) => {
 socket.on('error', (message) => {
     gameMessage.textContent = `Error: ${message}`;
     console.error('Socket error:', message);
+});
+
+// Trade-related socket handlers
+socket.on('tradeProposed', (data) => {
+    const { tradeResponseModal, tradeProposalContent, respondAsPlayer } = getTradeDom();
+    if (!tradeResponseModal || !tradeProposalContent || !respondAsPlayer) return;
+
+    const trade = data.trade;
+    const fromName = data.from?.name || 'Someone';
+
+    pendingTradeId = trade.id;
+
+    let offerPropsHtml = 'None';
+    if (trade.offer.properties && trade.offer.properties.length > 0) {
+        offerPropsHtml = trade.offer.properties
+            .map(pid => gameState.board[pid]?.name || `Property #${pid}`)
+            .join(', ');
+    }
+
+    let requestPropsHtml = 'None';
+    if (trade.request.properties && trade.request.properties.length > 0) {
+        requestPropsHtml = trade.request.properties
+            .map(pid => gameState.board[pid]?.name || `Property #${pid}`)
+            .join(', ');
+    }
+
+    tradeProposalContent.innerHTML = `
+        <strong>${fromName}</strong> is proposing a trade:<br><br>
+        <div style="margin-left: 10px; border-left: 3px solid #667eea; padding-left: 10px;">
+            <strong style="color: #667eea;">They offer:</strong><br>
+            $${trade.offer.money} and properties: ${offerPropsHtml}<br><br>
+            <strong style="color: #667eea;">They request:</strong><br>
+            $${trade.request.money} and properties: ${requestPropsHtml}
+        </div>
+    `;
+
+    respondAsPlayer.innerHTML = '<option value="">Select player to respond</option>';
+    gameState.players.forEach((player) => {
+        const option = document.createElement('option');
+        option.value = player.id;
+        option.textContent = player.name;
+        if (player.id === myPlayerId) option.selected = true;
+        respondAsPlayer.appendChild(option);
+    });
+
+    tradeResponseModal.style.display = 'flex';
+});
+
+socket.on('tradeProposalSent', () => {
+    gameMessage.textContent = 'Trade proposal sent.';
+});
+
+if (tradeAcceptBtn && tradeRejectBtn && respondAsPlayer && tradeResponseModal) {
+    tradeAcceptBtn.addEventListener('click', () => {
+        if (!pendingTradeId) return;
+        const selectedPlayerId = respondAsPlayer.value;
+        if (!selectedPlayerId) {
+            alert('Please select a player to respond as');
+            return;
+        }
+
+        socket.emit('respondTrade', { tradeId: pendingTradeId, accept: true, respondAsId: selectedPlayerId });
+        tradeResponseModal.style.display = 'none';
+        pendingTradeId = null;
+    });
+
+    tradeRejectBtn.addEventListener('click', () => {
+        if (!pendingTradeId) return;
+        const selectedPlayerId = respondAsPlayer.value;
+        if (!selectedPlayerId) {
+            alert('Please select a player to respond as');
+            return;
+        }
+
+        socket.emit('respondTrade', { tradeId: pendingTradeId, accept: false, respondAsId: selectedPlayerId });
+        tradeResponseModal.style.display = 'none';
+        pendingTradeId = null;
+    });
+}
+
+socket.on('tradeExecuted', () => {
+    gameMessage.textContent = 'Trade executed.';
+    updateUI();
+});
+
+socket.on('tradeDeclined', () => {
+    gameMessage.textContent = 'Trade declined.';
+});
+
+socket.on('tradeError', (msg) => {
+    gameMessage.textContent = `Trade error: ${msg}`;
+    console.error('Trade error:', msg);
+});
+
+socket.on('tradeNotification', (data) => {
+    gameMessage.textContent = data.message || 'Trade update';
+    updateUI();
+});
+
+socket.on('playerBankrupt', (data) => {
+  if (data.creditorName) {
+    gameMessage.textContent = `${data.playerName} went bankrupt and transferred all assets to ${data.creditorName}.`;
+  } else {
+    gameMessage.textContent = `${data.playerName} went bankrupt to the bank.`;
+  }
+  updateUI();
+});
+
+socket.on('gameOver', (data) => {
+  gameMessage.textContent = `Game Over! ${data.winnerName} wins!`;
+  gameStatus.textContent = 'Game Over';
+  controlsTurnStatus.textContent = 'Game Over';
+  updateUI();
 });
 
 // Log unhandled promise rejections to help debug extension vs app issues
@@ -418,6 +920,7 @@ function updateUI() {
     // Show game screen
     lobbyScreen.style.display = 'none';
     gameScreen.style.display = 'block';
+    ensureFeatureButtonsVisible();
 
     // Show save/logout buttons only if logged in
     if (saveGameBtn) saveGameBtn.style.display = currentUser ? 'block' : 'none';
@@ -433,6 +936,15 @@ function updateUI() {
     updateControls();
 
     // Update game status
+    if (gameState.gamePhase === 'ended' && gameState.players.length === 1) {
+        const winner = gameState.players[0];
+        gameStatus.textContent = `${winner.name} Wins!`;
+        gameStatus.style.color = winner.color;
+        controlsTurnStatus.textContent = 'Game Over';
+        controlsTurnStatus.style.color = winner.color;
+        return;
+    }
+
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     if (currentPlayer) {
         gameStatus.textContent = `${currentPlayer.name}'s Turn`;
@@ -446,6 +958,7 @@ function updateLobby() {
     // Show lobby
     lobbyScreen.style.display = 'block';
     gameScreen.style.display = 'none';
+    ensureFeatureButtonsVisible();
 
     // Update player list
     playerList.innerHTML = '';
@@ -567,6 +1080,7 @@ function createSpace(spaceId, row, col) {
             <div class="space-name">${space.name}</div>
             ${space.price > 0 ? `<div class="space-price">$${space.price}</div>` : ''}
             ${space.amount ? `<div class="space-price">$${space.amount}</div>` : ''}
+            ${renderBuildingMarkers(space)}
         </div>
         <div class="space-tokens"></div>
     `;
@@ -621,13 +1135,23 @@ function updateControls() {
         skipBuyBtn.style.display = 'none';
     }
 
-    // Rent payment uses the roll button as a context action
+    // Rent payment uses a dedicated highlighted button
+    if (payRentBtn) {
+        payRentBtn.style.display = 'none';
+        payRentBtn.classList.remove('flashing');
+        payRentBtn.disabled = true;
+    }
     if (gameState.gamePhase === 'payingRent' && gameState.pendingRent) {
         const isPayer = isMyTurn && currentPlayer && gameState.pendingRent.payerId === currentPlayer.id;
-        rollDiceBtn.textContent = `Pay Rent: $${gameState.pendingRent.rent}`;
-        rollDiceBtn.disabled = !isPayer;
+        rollDiceBtn.disabled = true;
         buyPropertyBtn.style.display = 'none';
         skipBuyBtn.style.display = 'none';
+        if (payRentBtn) {
+            payRentBtn.style.display = 'block';
+            payRentBtn.textContent = `Pay Rent: $${gameState.pendingRent.rent}`;
+            payRentBtn.disabled = !isPayer;
+            if (isPayer) payRentBtn.classList.add('flashing');
+        }
     }
 
     // Jail controls
@@ -641,11 +1165,7 @@ function updateControls() {
         useJailCardBtn.disabled = currentPlayer.getOutOfJailCards <= 0;
     }
 
-    // Legacy dedicated pay-rent button is hidden (rent now uses roll button)
-    const payRentBtn = document.getElementById('payRentBtn');
-    if (payRentBtn) {
-        payRentBtn.style.display = 'none';
-    }
+    updateBuildingControls(currentPlayer, isMyTurn);
 }
 
 function displayDice(dice) {
@@ -684,6 +1204,120 @@ function getColorHex(color) {
     return colors[color] || '#CCC';
 }
 
+function getHouseCost(propertyColor) {
+    const costs = {
+        brown: 50,
+        lightblue: 50,
+        pink: 100,
+        orange: 100,
+        red: 150,
+        yellow: 150,
+        green: 200,
+        darkblue: 200
+    };
+    return costs[propertyColor] || 100;
+}
+
+function renderBuildingMarkers(space) {
+    if (!space || space.type !== 'property') return '';
+
+    if (space.hotel) {
+        return '<div class="building-markers"><span class="hotel-marker">🏨</span></div>';
+    }
+
+    const houses = Number(space.houses) || 0;
+    if (houses <= 0) return '';
+
+    let housesHtml = '';
+    for (let i = 0; i < houses; i += 1) {
+        housesHtml += '<span class="house-marker">🏠</span>';
+    }
+
+    return `<div class="building-markers">${housesHtml}</div>`;
+}
+
+function buildingLevel(space) {
+    return space?.hotel ? 5 : (Number(space?.houses) || 0);
+}
+
+function ownsColorSet(player, color) {
+    const setSpaces = gameState.board.filter(s => s.type === 'property' && s.color === color);
+    const ownedSet = new Set((player.properties || []).map((id) => Number(id)));
+    return setSpaces.length > 0
+        && setSpaces.every(s => ownedSet.has(Number(s.id)));
+}
+
+function canBuildPropertyClient(player, property) {
+    if (!property || property.type !== 'property') return false;
+    const ownedSet = new Set((player.properties || []).map((id) => Number(id)));
+    const ownsProperty = ownedSet.has(Number(property.id));
+    if (!ownsProperty && property.owner !== player.id) return false;
+    if (!ownsColorSet(player, property.color)) return false;
+
+    const setSpaces = gameState.board.filter(s => s.type === 'property' && s.color === property.color);
+    const nextLevel = Math.min(5, buildingLevel(property) + 1);
+    const simulated = setSpaces.map((s) => (s.id === property.id ? nextLevel : buildingLevel(s)));
+    const maxLevel = Math.max(...simulated);
+    const minLevel = Math.min(...simulated);
+    if (maxLevel - minLevel > 1) return false;
+
+    return player.money >= getHouseCost(property.color);
+}
+
+function updateBuildingControls(currentPlayer, isMyTurn) {
+    if (!buildingControls || !gameState || !currentPlayer) return;
+
+    const ownedProps = (currentPlayer.properties || [])
+        .map((id) => gameState.board[Number(id)])
+        .filter((space) => space && space.type === 'property');
+
+    if (ownedProps.length === 0) {
+        buildingControls.innerHTML = '<div class="building-controls-title">Build Houses / Hotels</div><div class="player-properties">Own a full color set to build.</div>';
+        return;
+    }
+
+    if (!isMyTurn || gameState.gamePhase === 'buying' || gameState.gamePhase === 'payingRent' || gameState.gamePhase === 'ended') {
+        buildingControls.innerHTML = '<div class="building-controls-title">Build Houses / Hotels</div><div class="player-properties">Builds are available on your turn during rolling phase.</div>';
+        return;
+    }
+
+    const buildableProps = ownedProps.filter((space) => ownsColorSet(currentPlayer, space.color));
+    if (buildableProps.length === 0) {
+        buildingControls.innerHTML = '<div class="building-controls-title">Build Houses / Hotels</div><div class="player-properties">You need all properties in a color set to build.</div>';
+        return;
+    }
+
+    const title = '<div class="building-controls-title">Build Houses / Hotels</div>';
+    const rows = buildableProps.map((space) => {
+        const cost = getHouseCost(space.color);
+        const level = buildingLevel(space);
+        const canBuild = canBuildPropertyClient(currentPlayer, space) && level < 5;
+        let buttonLabel = `Build House ($${cost})`;
+        if (level >= 4 && !space.hotel) buttonLabel = `Build Hotel ($${cost})`;
+        if (space.hotel) buttonLabel = 'Hotel Built';
+        const disabledAttr = canBuild ? '' : 'disabled';
+
+        return `
+            <div class="building-row">
+                <div>
+                    <div>${space.name}</div>
+                    ${renderBuildingMarkers(space)}
+                </div>
+                <button class="action-btn" data-build-property="${space.id}" ${disabledAttr}>${buttonLabel}</button>
+            </div>
+        `;
+    }).join('');
+
+    buildingControls.innerHTML = `${title}${rows}`;
+
+    buildingControls.querySelectorAll('button[data-build-property]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const propertyId = Number(btn.getAttribute('data-build-property'));
+            socket.emit('buyBuilding', { propertyId });
+        });
+    });
+}
+
 // Allow Enter key to join
 playerNameInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') {
@@ -708,4 +1342,198 @@ function getPlayerPropertyNames(player) {
         .map(propertyID => gameState.board[propertyID]?.name)
         .filter(Boolean);
 }
+
+function clearTutorialFocus() {
+    document.querySelectorAll('.tutorial-focus').forEach(el => el.classList.remove('tutorial-focus'));
+}
+
+function findStepElement(step) {
+    if (!step?.selector) return null;
+    return document.querySelector(step.selector);
+}
+
+function getTutorialSteps() {
+    return [
+        {
+            title: 'Welcome to Monopoly',
+            text: 'This quick guide walks through the main controls so your group can start fast.',
+            selector: '#lobby'
+        },
+        {
+            title: 'Join the Game',
+            text: 'Enter a name and press Join Game. You need at least 2 players to begin.',
+            selector: '#playerName'
+        },
+        {
+            title: 'Start the Match',
+            text: 'When enough players join, press Start Game to begin turn-based play.',
+            selector: '#startBtn'
+        },
+        {
+            title: 'Rolling and Turns',
+            text: 'Use Roll Dice on your turn. The status header and sidebar both show whose turn it is.',
+            selector: '#rollDiceBtn'
+        },
+        {
+            title: 'Buying and Rent',
+            text: 'Land on unowned property to buy it. Land on owned property to pay rent.',
+            selector: '#buyPropertyBtn'
+        },
+        {
+            title: 'Trading System',
+            text: 'Use Propose Trade to offer money/properties and negotiate with other players.',
+            selector: '#proposeTradeBtn'
+        },
+        {
+            title: 'Railroad Rent Rule',
+            text: 'Railroad rent scales as $25, $50, $100, then $200 as the owner holds more railroads.',
+            selector: '#howToPlayContent'
+        },
+        {
+            title: 'You Are Ready',
+            text: 'Use the How to Play panel anytime and restart this tutorial from the lobby or game screen.',
+            selector: '#howToPlayToggle'
+        }
+    ];
+}
+
+function positionTutorialCard(targetEl) {
+    const card = document.getElementById('tutorialCard');
+    if (!card) return;
+    if (!targetEl) {
+        card.style.top = '24px';
+        card.style.right = '24px';
+        card.style.left = 'auto';
+        return;
+    }
+
+    const rect = targetEl.getBoundingClientRect();
+    const cardWidth = card.offsetWidth || 340;
+    const gap = 14;
+    let left = rect.right + gap;
+    let top = rect.top;
+
+    if (left + cardWidth > window.innerWidth - 16) {
+        left = Math.max(16, rect.left - cardWidth - gap);
+    }
+    if (top + 220 > window.innerHeight - 16) {
+        top = Math.max(16, window.innerHeight - 236);
+    }
+
+    card.style.left = `${left}px`;
+    card.style.top = `${top}px`;
+    card.style.right = 'auto';
+}
+
+function renderTutorialStep() {
+    const overlay = document.getElementById('tutorialOverlay');
+    const stepCounterEl = document.getElementById('tutorialStepCounter');
+    const titleEl = document.getElementById('tutorialTitle');
+    const textEl = document.getElementById('tutorialText');
+    const prevBtnEl = document.getElementById('tutorialPrevBtn');
+    const nextBtnEl = document.getElementById('tutorialNextBtn');
+    if (!tutorialActive || !overlay || !stepCounterEl || !titleEl || !textEl || !prevBtnEl || !nextBtnEl) return;
+
+    const step = tutorialSteps[tutorialIndex];
+    if (!step) return;
+
+    stepCounterEl.textContent = `Step ${tutorialIndex + 1} of ${tutorialSteps.length}`;
+    titleEl.textContent = step.title;
+    textEl.textContent = step.text;
+
+    clearTutorialFocus();
+    const el = findStepElement(step);
+    if (el) {
+        el.classList.add('tutorial-focus');
+        el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+    }
+    positionTutorialCard(el);
+
+    prevBtnEl.disabled = tutorialIndex === 0;
+    nextBtnEl.textContent = tutorialIndex === tutorialSteps.length - 1 ? 'Finish' : 'Next';
+}
+
+function closeTutorial() {
+    tutorialActive = false;
+    clearTutorialFocus();
+    const overlay = document.getElementById('tutorialOverlay');
+    if (overlay) overlay.style.display = 'none';
+    localStorage.setItem('monopolyTutorialSeen', '1');
+}
+
+function startTutorial() {
+    ensureTradeAndTutorialContainers();
+    const overlay = document.getElementById('tutorialOverlay');
+    const card = document.getElementById('tutorialCard');
+    if (!overlay || !card) return;
+    tutorialSteps = getTutorialSteps();
+    tutorialIndex = 0;
+    tutorialActive = true;
+    overlay.style.display = 'block';
+    renderTutorialStep();
+}
+
+if (lobbyTutorialBtn) lobbyTutorialBtn.addEventListener('click', startTutorial);
+if (gameTutorialBtn) gameTutorialBtn.addEventListener('click', startTutorial);
+
+if (tutorialPrevBtn) {
+    tutorialPrevBtn.addEventListener('click', () => {
+        if (tutorialIndex <= 0) return;
+        tutorialIndex -= 1;
+        renderTutorialStep();
+    });
+}
+
+if (tutorialNextBtn) {
+    tutorialNextBtn.addEventListener('click', () => {
+        if (tutorialIndex >= tutorialSteps.length - 1) {
+            closeTutorial();
+            return;
+        }
+        tutorialIndex += 1;
+        renderTutorialStep();
+    });
+}
+
+if (tutorialCloseBtn) {
+    tutorialCloseBtn.addEventListener('click', closeTutorial);
+}
+
+if (tutorialOverlay) {
+    tutorialOverlay.addEventListener('click', (e) => {
+        if (e.target === tutorialOverlay) closeTutorial();
+    });
+}
+
+window.addEventListener('resize', () => {
+    if (tutorialActive) renderTutorialStep();
+});
+
+window.addEventListener('scroll', () => {
+    if (tutorialActive) renderTutorialStep();
+}, { passive: true });
+
+window.addEventListener('keydown', (e) => {
+    if (!tutorialActive) return;
+    if (e.key === 'Escape') closeTutorial();
+    if (e.key === 'ArrowRight') {
+        if (tutorialIndex >= tutorialSteps.length - 1) closeTutorial();
+        else {
+            tutorialIndex += 1;
+            renderTutorialStep();
+        }
+    }
+    if (e.key === 'ArrowLeft') {
+        if (tutorialIndex > 0) {
+            tutorialIndex -= 1;
+            renderTutorialStep();
+        }
+    }
+});
+
+setTimeout(() => {
+    if (!localStorage.getItem('monopolyTutorialSeen')) {
+        startTutorial();
+    }
+}, 700);
 

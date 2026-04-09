@@ -10,54 +10,60 @@
 <body>
     <!-- Game Lobby -->
     <div id="lobby" class="screen">
-        <div class="lobby-container">
-            <h1>🎲 Monopoly Multiplayer</h1>
+    <div class="lobby-container">
+        <h1>🎲 Monopoly Multiplayer</h1>
 
-            <!-- Auth Section -->
-            <div class="auth-section">
-                <!-- Shown when NOT logged in -->
-                <div id="authForms">
-                    <div class="auth-tabs">
-                        <button id="showLoginTab" class="auth-tab auth-tab-active">Log In</button>
-                        <button id="showRegisterTab" class="auth-tab">Register</button>
-                    </div>
-                    <div id="loginTab" class="auth-form">
-                        <input type="text" id="loginUsername" placeholder="Username" maxlength="20">
-                        <input type="password" id="loginPassword" placeholder="Password">
-                        <button id="loginBtn" class="auth-btn">Log In</button>
-                    </div>
-                    <div id="registerTab" class="auth-form" style="display:none;">
-                        <input type="text" id="regUsername" placeholder="Username (3–20 chars)" maxlength="20">
-                        <input type="password" id="regPassword" placeholder="Password (min 4 chars)">
-                        <button id="registerBtn" class="auth-btn">Register</button>
-                    </div>
-                    <div id="authMessage" class="auth-message"></div>
-                </div>
-                <!-- Shown when logged in -->
-                <div id="loggedInSection" style="display:none;">
-                    <div class="logged-in-bar">
-                        <span>Logged in as <strong id="loggedInName"></strong></span>
-                        <button id="logoutBtn" class="auth-btn-small">Log Out</button>
-                    </div>
-                    <div id="savedGamesSection">
-                        <div class="saved-games-header">
-                            <span>Saved Games</span>
-                            <button id="refreshSavesBtn" class="auth-btn-small">Refresh</button>
-                        </div>
-                        <div id="savedGamesList" class="saved-games-list"></div>
-                    </div>
-                </div>
+        <!-- Auth Section -->
+        <div class="auth-section">
+        <!-- Shown when NOT logged in -->
+        <div id="authForms">
+            <div class="auth-tabs">
+            <button id="showLoginTab" class="auth-tab auth-tab-active">Log In</button>
+            <button id="showRegisterTab" class="auth-tab">Register</button>
             </div>
 
-            <hr class="lobby-divider">
-
-            <div class="lobby-form">
-                <input type="text" id="playerName" placeholder="Enter your name" maxlength="20">
-                <button id="joinBtn">Join Game</button>
+            <div id="loginTab" class="auth-form">
+            <input type="text" id="loginUsername" placeholder="Username" maxlength="20">
+            <input type="password" id="loginPassword" placeholder="Password">
+            <button id="loginBtn" class="auth-btn">Log In</button>
             </div>
+
+            <div id="registerTab" class="auth-form" style="display:none;">
+            <input type="text" id="regUsername" placeholder="Username (3–20 chars)" maxlength="20">
+            <input type="password" id="regPassword" placeholder="Password (min 4 chars)">
+            <button id="registerBtn" class="auth-btn">Register</button>
+            </div>
+
+            <div id="authMessage" class="auth-message"></div>
+        </div>
+
+        <!-- Shown when logged in -->
+        <div id="loggedInSection" style="display:none;">
+            <div class="logged-in-bar">
+            <span>Logged in as <strong id="loggedInName"></strong></span>
+            <button id="logoutBtn" class="auth-btn-small">Log Out</button>
+            </div>
+
+            <div id="savedGamesSection">
+            <div class="saved-games-header">
+                <span>Saved Games</span>
+                <button id="refreshSavesBtn" class="auth-btn-small">Refresh</button>
+            </div>
+            <div id="savedGamesList" class="saved-games-list"></div>
+            </div>
+        </div>
+        </div>
+
+        <hr class="lobby-divider">
+
+        <div class="lobby-form">
+        <input type="text" id="playerName" placeholder="Enter your name" maxlength="20">
+        <button id="joinBtn">Join Game</button>
+        </div>
             <div id="lobbyStatus" class="status-message"></div>
             <div id="playerList" class="player-list"></div>
             <button id="startBtn" class="start-btn" style="display: none;">Start Game</button>
+            <button id="lobbyTutorialBtn" class="start-btn" style="margin-top: 10px;">Start Tutorial</button>
         </div>
     </div>
 
@@ -75,18 +81,21 @@
                     <h3>Players</h3>
                     <div id="playersList"></div>
                 </div>
-                
-                <div class="controls-panel">
+                    <div class="controls-panel">
                     <div id="controlsTurnStatus" class="controls-turn-status"></div>
                     <div id="diceDisplay" class="dice-display"></div>
                     <button id="rollDiceBtn" class="action-btn" disabled>Roll Dice</button>
                     <button id="payRentBtn" class="action-btn" style="display: none;"></button>
                     <button id="payJailFineBtn" class="action-btn" style="display: none;">Pay Jail Fine ($50)</button>
                     <button id="useJailCardBtn" class="action-btn secondary" style="display: none;">Use Get Out of Jail Free</button>
-                    <button id="buyPropertyBtn" class="action-btn" class="action-btn" style="display: none;">Buy Property</button>
+                    <button id="buyPropertyBtn" class="action-btn" style="display: none;">Buy Property</button>
                     <button id="skipBuyBtn" class="action-btn secondary" style="display: none;">Skip</button>
+
+                    <div id="buildingControls" class="building-controls"></div>
+
                     <div id="gameMessage" class="game-message"></div>
-                </div>
+                    </div>
+
             </div>
 
             <!-- Game Board -->
@@ -95,10 +104,82 @@
             </div>
         </div>
 
+        <!-- Trade Modal -->
+        <div id="tradeModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Propose a Trade</h3>
+                    <button id="tradeModalClose" class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label>Trade With:</label>
+                        <select id="tradeTarget">
+                            <option value="">Select a player</option>
+                        </select>
+                    </div>
+                    
+                    <div class="trade-columns">
+                        <div class="trade-column">
+                            <h4>You Offer</h4>
+                            <div class="form-group">
+                                <label>Money:</label>
+                                <input type="number" id="offerMoney" min="0" value="0" placeholder="0">
+                            </div>
+                            <div class="form-group">
+                                <label>Properties (select):</label>
+                                <div id="offerProperties" class="property-list"></div>
+                            </div>
+                        </div>
+                        <div class="trade-column">
+                            <h4>You Request</h4>
+                            <div class="form-group">
+                                <label>Money:</label>
+                                <input type="number" id="requestMoney" min="0" value="0" placeholder="0">
+                            </div>
+                            <div class="form-group">
+                                <label>Properties (select):</label>
+                                <div id="requestProperties" class="property-list"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="tradeSubmitBtn" class="action-btn">Send Proposal</button>
+                    <button id="tradeCancelBtn" class="action-btn secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Incoming Trade Proposal Modal -->
+        <div id="tradeResponseModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Trade Proposal</h3>
+                </div>
+                <div class="modal-body">
+                    <div id="tradeProposalContent" style="font-size: 16px; line-height: 1.6;"></div>
+                    <div class="form-group" style="margin-top: 20px;">
+                        <label>Respond as (local testing only):</label>
+                        <select id="respondAsPlayer">
+                            <option value="">Select player</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="tradeAcceptBtn" class="action-btn">Accept</button>
+                    <button id="tradeRejectBtn" class="action-btn secondary">Decline</button>
+                </div>
+            </div>
+        </div>
+
         <!-- How to Play section -->
         <div class="how-to-play-container">
             <button id="howToPlayToggle" class="action-btn secondary how-to-play-button">
                 How to Play
+            </button>
+            <button id="gameTutorialBtn" class="action-btn secondary how-to-play-button" style="margin-top: 10px;">
+                Guided Tutorial
             </button>
             <div id="howToPlayContent" class="how-to-play-content" style="display: none;">
                 <h3>How to Play Monopoly</h3>
@@ -107,6 +188,7 @@
                     <li>On your turn, click <strong>Roll Dice</strong> and move your token the total number of spaces.</li>
                     <li>If you land on an unowned property, you may choose to buy it.</li>
                     <li>If you land on another player's property, you must pay them rent.</li>
+                    <li>Railroad rent increases as the owner has more railroads: $25, $50, $100, then $200.</li>
                     <li>Landing on Income Tax or Luxury Tax requires you to pay the bank.</li>
                     <li>Landing on GO TO JAIL sends you directly to Jail.</li>
                     <li>Pass GO to collect $200 from the bank.</li>
@@ -114,12 +196,18 @@
                 </ul>
             </div>
         </div>
+    </div>
 
-        <!-- Save Game Bar -->
-        <div class="save-game-bar">
-            <button id="saveGameBtn" class="action-btn save-game-btn" style="display:none;">Save Game</button>
-            <button id="gameLogoutBtn" class="action-btn save-game-btn" style="display:none;">Log Out</button>
-            <div id="saveGameMessage" class="save-game-message"></div>
+    <div id="tutorialOverlay" class="tutorial-overlay" style="display: none;">
+        <div id="tutorialCard" class="tutorial-card" role="dialog" aria-modal="true" aria-label="Game tutorial">
+            <div class="tutorial-step" id="tutorialStepCounter">Step 1</div>
+            <h3 id="tutorialTitle">Welcome</h3>
+            <p id="tutorialText"></p>
+            <div class="tutorial-actions">
+                <button id="tutorialPrevBtn" class="action-btn secondary">Previous</button>
+                <button id="tutorialNextBtn" class="action-btn">Next</button>
+                <button id="tutorialCloseBtn" class="action-btn secondary">Close</button>
+            </div>
         </div>
     </div>
 
