@@ -169,9 +169,6 @@ const COMMUNITY_CHEST_CARDS = [
 
 // Broadcast game state to all clients
 function broadcastGameState() {
-  if (!gameState.transactions) {
-    gameState.transactions = [];
-  }
   io.emit('gameState', gameState);
 }
 
@@ -261,7 +258,7 @@ app.post('/api/save-game', async (req, res) => {
     return res.status(400).json({ error: 'Save name required' });
   }
   try {
-    const gameData = gameState;
+    const gameData = JSON.stringify(gameState);
     const { rows } = await pool.query(
       'INSERT INTO saved_games (user_id, name, game_data) VALUES ($1, $2, $3) RETURNING id, name, saved_at',
       [req.session.userId, name.trim(), gameData]
@@ -663,23 +660,16 @@ io.on('connection', (socket) => {
   socket.on('joinGame', (playerName) => {
     // If a loaded save has a player with this name waiting to reconnect, restore them
     // (must be checked before the gameStarted guard so reconnection works after loading)
-    history: [];
-    const existingDisconnected = gameState.players.find(
-      p => p.name === playerName && !p.socketId
-    );
-
-    if (existingDisconnected) {
-      existingDisconnected.socketId = socket.id;
+    const savedPlayer = gameState.players.find(p => p.name === playerName && !p.socketId);
+    if (savedPlayer) {
+      savedPlayer.socketId = socket.id;
+      console.log(`${playerName} reconnected to loaded save`);
       broadcastGameState();
       return;
     }
 
-    const existingActive = gameState.players.find(
-      p => p.name === playerName && p.socketId
-    );
-
-    if (existingActive) {
-      socket.emit('error', 'Name already taken');
+    if (gameState.gameStarted) {
+      socket.emit('error', 'Game has already started');
       return;
     }
 
@@ -688,31 +678,31 @@ io.on('connection', (socket) => {
       return;
     }
 
-  const player = {
-    id: createPlayerId(),
-    socketId: socket.id,
-    name: playerName,
-    money: 1500,
-    position: 0,
-    properties: [],
-    color: PLAYER_COLORS[gameState.players.length % PLAYER_COLORS.length],
-    inJail: false,
-    jailTurns: 0,
-    getOutOfJailCards: 0,
-    hasPaidJailFine: false,
-    consecutiveDoubles: 0,
-    history: []
-  };
+    const player = {
+      id: createPlayerId(),
+      socketId: socket.id,
+      name: playerName,
+      money: 1500,
+      position: 0,
+      properties: [],
+      color: PLAYER_COLORS[gameState.players.length % PLAYER_COLORS.length],
+      inJail: false,
+      jailTurns: 0,
+      getOutOfJailCards: 0,
+      hasPaidJailFine: false,
+      consecutiveDoubles: 0
+    };
 
-  gameState.players.push(player);
-  broadcastGameState();
+    gameState.players.push(player);
+    console.log(`${playerName} joined the game`);
+    broadcastGameState();
   });
 
   // Handle starting the game
   socket.on('startGame', () => {
-    if (gameState.players.length < 1) {
-      socket.emit('error', 'Need at least 1 player');
-    return;
+    if (gameState.players.length < 2) {
+      socket.emit('error', 'Need at least 2 players to start');
+      return;
     }
     if (gameState.gameStarted) {
       socket.emit('error', 'Game already started');
@@ -876,14 +866,7 @@ io.on('connection', (socket) => {
         postCardResult = handleLandOnSpace(currentPlayer, destinationSpace, total);
       }
     }
-    currentPlayer.history.push({
-      type: 'move',
-      from: oldPosition,
-      to: newPosition,
-      dice: total,
-      time: Date.now()
-    });
-    
+
     const finalResult = postCardResult || result;
 
     // Update game phase
@@ -1031,16 +1014,6 @@ owner.money += pending.rent;
         broadcastGameState();
       }, 1000);
     }
-
-    gameState.transactions.push({
-      type: 'rent',
-      from: payer.id,
-      to: owner.id,
-      amount: pending.rent,
-      property: pending.propertyName,
-      time: Date.now()
-    });
-    
   });
 
   socket.on('payJailFine', () => {
@@ -1123,6 +1096,11 @@ owner.money += pending.rent;
   // Handle buying property
   socket.on('buyProperty', () => {
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+    
+    if (!gameState.freePlay && socket.id !== currentPlayer.socketId) {
+      socket.emit('error', 'Not your turn');
+      return;
+    }
 
     if (gameState.gamePhase !== 'buying') {
       socket.emit('error', 'Cannot buy property now');
@@ -1170,21 +1148,6 @@ owner.money += pending.rent;
       gameState.gamePhase = 'rolling';
       broadcastGameState();
     }, 2000);
-
-    gameState.transactions.push({
-      type: 'buy',
-      playerId: currentPlayer.id,
-      property: space.name,
-      amount: space.price,
-      time: Date.now()
-    });
-
-    currentPlayer.history.push({
-      type: 'buy',
-      property: space.name,
-      price: space.price,
-      time: Date.now()
-});
   });
 
   // Handle skipping property purchase
@@ -1398,10 +1361,8 @@ owner.money += pending.rent;
   // Handle player disconnect
   socket.on('disconnect', () => {
     console.log('Player disconnected:', socket.id);
-    const player = gameState.players.find(p => p.socketId === socket.id);
-    if (player) {
-      player.socketId = null;
-    }    
+    gameState.players = gameState.players.filter(p => p.socketId !== socket.id);
+    
     // If no players left, reset game
     if (gameState.players.length === 0) {
       gameState.gameStarted = false;
@@ -1419,16 +1380,6 @@ owner.money += pending.rent;
     }
     
     broadcastGameState();
-  });
-  // in-game chat
-  socket.on('sendMessage', (msg) => {
-  const player = gameState.players.find(p => p.socketId === socket.id);
-
-  io.emit('chatMessage', {
-    player: player ? player.name : 'Unknown',
-    message: msg,
-    time: Date.now()
-    });
   });
 });
 
