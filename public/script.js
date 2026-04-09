@@ -454,7 +454,18 @@ payJailFineBtn.addEventListener('click', () => {
 useJailCardBtn.addEventListener('click', () => {
     socket.emit('useGetOutOfJailCard');
 });
-
+//send chat
+function sendChat() {
+  const input = document.getElementById('chatInput');
+  socket.emit('sendMessage', input.value);
+  input.value = '';
+}
+//message send
+socket.on('chatMessage', (data) => {
+  const box = document.getElementById('chatBox');
+  box.innerHTML += `<div><b>${data.player}:</b> ${data.message}</div>`;
+  box.scrollTop = box.scrollHeight;
+});
 // ── Auth UI ──────────────────────────────────────────────────────────────────
 
 const authForms = document.getElementById('authForms');
@@ -681,16 +692,36 @@ if (saveGameBtn) {
 }
 
 // ── Socket event listeners ───────────────────────────────────────────────────
-
+function showMoneyEffect(t) {
+  console.log('💸 Transaction:', t);
+}
 // Socket event listeners
 socket.on('gameState', (state) => {
     gameState = state;
     const me = gameState?.players?.find(p => p.socketId === socket.id);
     if (me) myPlayerId = me.id;
     updateUI();
+
+    const last = state.transactions?.slice(-1)[0];
+    if (!last) return;
+
+    showMoneyEffect(last);
 });
 
+// animation Rolled
+function animateMove(playerId, steps) {
+  let step = 0;
+
+  const interval = setInterval(() => {
+    moveTokenOneStep(playerId); // you already have token positioning
+    step++;
+
+    if (step >= steps) clearInterval(interval);
+  }, 200);
+}
+
 socket.on('diceRolled', (data) => {
+    animateMove(data.playerId, data.total);
     console.log('diceRolled event', data);
     displayDice(data.dice);
     const currentPlayer = gameState?.players?.find(player => player.id === data.playerId)
@@ -752,6 +783,9 @@ socket.on('diceRolled', (data) => {
     }
     
     updateUI();
+
+    
+    
 });
 
 // Rent paid event from server
