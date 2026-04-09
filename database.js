@@ -2,17 +2,25 @@ import pg from 'pg';
 
 const { Pool } = pg;
 
-if (!process.env.DATABASE_URL) {
-  console.error('ERROR: DATABASE_URL environment variable is not set. Add it in your Railway service variables.');
-  process.exit(1);
+export const dbEnabled = Boolean(process.env.DATABASE_URL);
+
+if (!dbEnabled) {
+  console.warn('DATABASE_URL is not set. Running in local mode without database-backed auth/saves.');
 }
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
+const pool = dbEnabled
+  ? new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false }
+    })
+  : {
+      query: async () => {
+        throw new Error('Database is disabled (DATABASE_URL not set).');
+      }
+    };
 
 export async function initDb() {
+  if (!dbEnabled) return;
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,

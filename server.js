@@ -5,7 +5,8 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import session from 'express-session';
 import bcrypt from 'bcryptjs';
-import pool, { initDb } from './database.js';
+import pool, { initDb, dbEnabled } from './database.js';
+import { registerDevTools } from './devTools.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -31,8 +32,8 @@ let gameState = {
   currentPlayerIndex: 0,
   board: [],
   gameStarted: false,
-  gamePhase: 'waiting' // waiting, rolling, moving, buying, ended
-  transactions: []
+  gamePhase: 'waiting', // waiting, rolling, moving, buying, ended
+  pendingTrades: []
 };
 
 function createPlayerId() {
@@ -83,8 +84,66 @@ const BOARD_SPACES = [
   { id: 39, name: 'Boardwalk', type: 'property', color: 'darkblue', price: 400, rent: 50, owner: null },
 ];
 
+const COLOR_GROUPS = BOARD_SPACES
+  .filter(space => space.type === 'property' && space.color)
+  .reduce((groups, space) => {
+    if (!groups[space.color]) groups[space.color] = [];
+    groups[space.color].push(space.id);
+    return groups;
+  }, {});
+
+const HOUSE_COST_BY_COLOR = {
+  brown: 50,
+  lightblue: 50,
+  pink: 100,
+  orange: 100,
+  red: 150,
+  yellow: 150,
+  green: 200,
+  darkblue: 200,
+};
+
+const PROPERTY_RENT_TIERS = {
+  1: [2, 10, 30, 90, 160, 250],
+  3: [4, 20, 60, 180, 320, 450],
+  6: [6, 30, 90, 270, 400, 550],
+  8: [6, 30, 90, 270, 400, 550],
+  9: [8, 40, 100, 300, 450, 600],
+  11: [10, 50, 150, 450, 625, 750],
+  13: [10, 50, 150, 450, 625, 750],
+  14: [12, 60, 180, 500, 700, 900],
+  16: [14, 70, 200, 550, 750, 950],
+  18: [14, 70, 200, 550, 750, 950],
+  19: [16, 80, 220, 600, 800, 1000],
+  21: [18, 90, 250, 700, 875, 1050],
+  23: [18, 90, 250, 700, 875, 1050],
+  24: [20, 100, 300, 750, 925, 1100],
+  26: [22, 110, 330, 800, 975, 1150],
+  27: [22, 110, 330, 800, 975, 1150],
+  29: [24, 120, 360, 850, 1025, 1200],
+  31: [26, 130, 390, 900, 1100, 1275],
+  32: [26, 130, 390, 900, 1100, 1275],
+  34: [28, 150, 450, 1000, 1200, 1400],
+  37: [35, 175, 500, 1100, 1300, 1500],
+  39: [50, 200, 600, 1400, 1700, 2000],
+};
+
+function createInitialBoard() {
+  return BOARD_SPACES.map((space) => {
+    const base = { ...space };
+    if (space.type === 'property') {
+      base.houses = 0;
+      base.hotel = false;
+      base.houseCost = HOUSE_COST_BY_COLOR[space.color] || 100;
+      base.rentTiers = PROPERTY_RENT_TIERS[space.id]
+        || [base.rent, base.rent * 2, base.rent * 3, base.rent * 4, base.rent * 5, base.rent * 6];
+    }
+    return base;
+  });
+}
+
 // Initialize board in game state
-gameState.board = BOARD_SPACES.map(space => ({ ...space }));
+gameState.board = createInitialBoard();
 
 // Player colors
 const PLAYER_COLORS = ['#fa0000', '#0bf2e3', '#efca13', '#35e71a', '#2d00a8', '#fc870b'];
@@ -118,7 +177,14 @@ function broadcastGameState() {
 
 // ── Auth & Game Save API Routes ──────────────────────────────────────────────
 
+function requireDatabase(res) {
+  if (dbEnabled) return false;
+  res.status(503).json({ error: 'Database features are disabled in local mode (set DATABASE_URL to enable auth and saves).' });
+  return true;
+}
+
 app.post('/api/register', async (req, res) => {
+  if (requireDatabase(res)) return;
   const { username, password } = req.body;
   if (!username || !password) {
     return res.status(400).json({ error: 'Username and password required' });
@@ -149,6 +215,7 @@ app.post('/api/register', async (req, res) => {
 });
 
 app.post('/api/login', async (req, res) => {
+  if (requireDatabase(res)) return;
   const { username, password } = req.body;
   if (!username || !password) {
     return res.status(400).json({ error: 'Username and password required' });
@@ -185,6 +252,7 @@ app.get('/api/me', (req, res) => {
 });
 
 app.post('/api/save-game', async (req, res) => {
+  if (requireDatabase(res)) return;
   if (!req.session.userId) {
     return res.status(401).json({ error: 'Must be logged in to save' });
   }
@@ -206,6 +274,7 @@ app.post('/api/save-game', async (req, res) => {
 });
 
 app.get('/api/saved-games', async (req, res) => {
+  if (requireDatabase(res)) return;
   if (!req.session.userId) {
     return res.status(401).json({ error: 'Must be logged in' });
   }
@@ -222,6 +291,7 @@ app.get('/api/saved-games', async (req, res) => {
 });
 
 app.post('/api/load-game', async (req, res) => {
+  if (requireDatabase(res)) return;
   if (!req.session.userId) {
     return res.status(401).json({ error: 'Must be logged in' });
   }
@@ -251,6 +321,7 @@ app.post('/api/load-game', async (req, res) => {
 });
 
 app.delete('/api/saved-games/:id', async (req, res) => {
+  if (requireDatabase(res)) return;
   if (!req.session.userId) {
     return res.status(401).json({ error: 'Must be logged in' });
   }
@@ -275,7 +346,34 @@ function calculateRent(space, owner) {
     const railroadCount = gameState.board.filter(s => 
       s.type === 'railroad' && s.owner === owner.id
     ).length;
-    return space.rent * railroadCount;
+    if (railroadCount <= 0) return 0;
+    return space.rent * Math.pow(2, railroadCount - 1);
+  }
+  if (space.type === 'property') {
+    const baseRent = Number(space.rent) || 0;
+    const rentTiers = Array.isArray(space.rentTiers) ? space.rentTiers : PROPERTY_RENT_TIERS[space.id];
+    const houses = Number(space.houses) || 0;
+    const hotel = !!space.hotel;
+    const level = hotel ? 5 : Math.max(0, Math.min(4, houses));
+
+    if (rentTiers && typeof rentTiers[level] === 'number') {
+      if (level > 0) return rentTiers[level];
+      const colorGroup = gameState.board.filter(s => s.type === 'property' && s.color === space.color);
+      const ownsFullSet = colorGroup.length > 0 && colorGroup.every(s => s.owner === owner.id);
+      return ownsFullSet ? rentTiers[0] * 2 : rentTiers[0];
+    }
+
+    if (hotel) {
+      return baseRent * 6;
+    }
+
+    if (houses > 0) {
+      return baseRent * (houses + 1);
+    }
+
+    const colorGroup = gameState.board.filter(s => s.type === 'property' && s.color === space.color);
+    const ownsFullSet = colorGroup.length > 0 && colorGroup.every(s => s.owner === owner.id);
+    return ownsFullSet ? baseRent * 2 : baseRent;
   }
   if (space.type === 'utility') {
     const utilityCount = gameState.board.filter(s => 
@@ -286,6 +384,166 @@ function calculateRent(space, owner) {
   }
   return space.rent;
 }
+
+function buildingLevel(space) {
+  return space?.hotel ? 5 : (Number(space?.houses) || 0);
+}
+
+function canBuildOnProperty(state, player, propertyId) {
+  const property = state.board[propertyId];
+  const ownedSet = new Set((player.properties || []).map((id) => Number(id)));
+  const ownsProperty = ownedSet.has(Number(propertyId));
+  if (!property || property.type !== 'property') {
+    return { ok: false, reason: 'Only standard properties can be developed' };
+  }
+
+  if (!ownsProperty && property.owner !== player.id) {
+    return { ok: false, reason: 'You do not own this property' };
+  }
+
+  const colorSet = state.board.filter(s => s.type === 'property' && s.color === property.color);
+  const ownsEntireSet = colorSet.length > 0 && colorSet.every(s => ownedSet.has(Number(s.id)));
+  if (!ownsEntireSet) {
+    return { ok: false, reason: 'You must own the full color set to build' };
+  }
+
+  const currentLevel = buildingLevel(property);
+  if (currentLevel >= 5) {
+    return { ok: false, reason: 'Hotel already built on this property' };
+  }
+
+  const nextLevel = currentLevel + 1;
+  const simulatedLevels = colorSet.map((s) => {
+    if (s.id === property.id) return nextLevel;
+    return buildingLevel(s);
+  });
+  const maxLevel = Math.max(...simulatedLevels);
+  const minLevel = Math.min(...simulatedLevels);
+  if (maxLevel - minLevel > 1) {
+    return { ok: false, reason: 'You must build evenly across the color set' };
+  }
+
+  const cost = HOUSE_COST_BY_COLOR[property.color] || 100;
+  if (player.money < cost) {
+    return { ok: false, reason: `Not enough money. Need $${cost}` };
+  }
+
+  return { ok: true, property, cost, nextLevel };
+}
+
+
+function buildOnProperty(property) {
+  const houses = Number(property.houses) || 0;
+  if (houses < 4) {
+    property.houses = houses + 1;
+    return 'house';
+  }
+  property.houses = 0;
+  property.hotel = true;
+  return 'hotel';
+}
+
+function declareBankruptcy(player, creditorId = null, reason = '') {
+  const bankruptIndex = gameState.players.findIndex(p => p.id === player.id);
+  if (bankruptIndex === -1) return;
+
+  const creditor = creditorId
+    ? gameState.players.find(p => p.id === creditorId)
+    : null;
+
+  const transferredProperties = [...(player.properties || [])];
+
+  // Transfer remaining cash
+  if (creditor) {
+    if (player.money > 0) {
+      creditor.money += player.money;
+    }
+
+    transferredProperties.forEach((propertyId) => {
+      const space = gameState.board[propertyId];
+      if (!space) return;
+
+      space.owner = creditor.id;
+
+      if (!creditor.properties.includes(propertyId)) {
+        creditor.properties.push(propertyId);
+      }
+    });
+  } else {
+    // Bankruptcy to the bank:
+    // reset property ownership and clear buildings
+    transferredProperties.forEach((propertyId) => {
+      const space = gameState.board[propertyId];
+      if (!space) return;
+
+      space.owner = null;
+
+      if (space.type === 'property') {
+        space.houses = 0;
+        space.hotel = false;
+      }
+    });
+  }
+
+  // Clear player's property list and money
+  player.properties = [];
+  player.money = 0;
+
+  // Remove pending rent if this player was part of it
+  if (
+    gameState.pendingRent &&
+    (
+      gameState.pendingRent.payerId === player.id ||
+      gameState.pendingRent.ownerId === player.id
+    )
+  ) {
+    delete gameState.pendingRent;
+  }
+
+  // Remove any pending trades involving this player
+  gameState.pendingTrades = (gameState.pendingTrades || []).filter(trade =>
+    trade.fromId !== player.id && trade.toId !== player.id
+  );
+
+  // Remove player from game
+  gameState.players.splice(bankruptIndex, 1);
+
+  // Fix current player index
+  if (gameState.players.length === 0) {
+    gameState.currentPlayerIndex = 0;
+    gameState.gameStarted = false;
+    gameState.gamePhase = 'waiting';
+  } else {
+    if (bankruptIndex < gameState.currentPlayerIndex) {
+      gameState.currentPlayerIndex -= 1;
+    } else if (gameState.currentPlayerIndex >= gameState.players.length) {
+      gameState.currentPlayerIndex = 0;
+    }
+  }
+
+  io.emit('playerBankrupt', {
+    playerId: player.id,
+    playerName: player.name,
+    creditorId: creditor ? creditor.id : null,
+    creditorName: creditor ? creditor.name : null,
+    reason,
+    transferredProperties
+  });
+
+  // Check win condition
+  if (gameState.players.length === 1 && gameState.gameStarted) {
+    gameState.gamePhase = 'ended';
+    io.emit('gameOver', {
+      winnerId: gameState.players[0].id,
+      winnerName: gameState.players[0].name
+    });
+  } else if (gameState.players.length > 1) {
+    gameState.gamePhase = 'rolling';
+  }
+
+  broadcastGameState();
+}
+
 
 function drawRandomCard(cards) {
   const index = Math.floor(Math.random() * cards.length);
@@ -393,6 +651,11 @@ function handleLandOnSpace(player, space, diceRoll) {
 io.on('connection', (socket) => {
   console.log('Player connected:', socket.id);
 
+  registerDevTools(io, socket, gameState, {
+    COLOR_GROUPS,
+    broadcastGameState
+  });
+
   // Send current game state to newly connected client
   socket.emit('gameState', gameState);
 
@@ -499,9 +762,15 @@ io.on('connection', (socket) => {
 
         // Third failed attempt: pay $50 and move using this roll
         if (currentPlayer.jailTurns >= 3) {
+          if (currentPlayer.money < 50) {
+            declareBankruptcy(currentPlayer, null, 'Could not pay third failed jail fine');
+            return;
+          }
+
           currentPlayer.money -= 50;
           currentPlayer.inJail = false;
           currentPlayer.jailTurns = 0;
+
           io.emit('diceRolled', {
             playerId: currentPlayer.id,
             playerName: currentPlayer.name,
@@ -637,7 +906,7 @@ io.on('connection', (socket) => {
       gameState.gamePhase = 'waiting';
     }
 
-    // Broadcast dice result and game state
+    // Broadcast dice result
     io.emit('diceRolled', {
       playerId: currentPlayer.id,
       playerName: currentPlayer.name,
@@ -650,6 +919,16 @@ io.on('connection', (socket) => {
       result: result,
       postCardResult: postCardResult
     });
+
+    // If player went negative from tax / cards / other bank debt, bankrupt to bank
+    if (finalResult.action !== 'rentDue' && currentPlayer.money < 0) {
+      declareBankruptcy(
+        currentPlayer,
+        null,
+        `Could not cover ${finalResult.action}`
+      );
+      return;
+    }
 
     broadcastGameState();
 
@@ -703,12 +982,18 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // Check funds
     if (payer.money < pending.rent) {
-      console.log(`Payer ${payer.id} has insufficient funds: ${payer.money} < ${pending.rent}`);
-      // Still allow negative balance for now, but notify
-      socket.emit('error', 'Not enough money to fully pay rent (will allow negative balance)');
+      declareBankruptcy(
+        payer,
+        owner.id,
+        `Could not pay $${pending.rent} rent for ${pending.propertyName}`
+      );
+      return;
     }
+
+// Process payment
+payer.money -= pending.rent;
+owner.money += pending.rent;
 
     // Process payment
     payer.money -= pending.rent;
@@ -778,6 +1063,11 @@ io.on('connection', (socket) => {
 
     if (currentPlayer.hasPaidJailFine) {
       socket.emit('error', 'Jail fine already paid this turn');
+      return;
+    }
+
+    if (currentPlayer.money < 50) {
+      declareBankruptcy(currentPlayer, null, 'Could not pay jail fine');
       return;
     }
 
@@ -923,6 +1213,181 @@ io.on('connection', (socket) => {
     }, 1000);
   });
 
+  // Handle buying houses/hotels
+  socket.on('buyBuilding', ({ propertyId }) => {
+    const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+    if (!currentPlayer || (!gameState.freePlay && socket.id !== currentPlayer.socketId)) {
+      socket.emit('error', 'Not your turn');
+      return;
+    }
+
+    if (gameState.gamePhase === 'buying' || gameState.gamePhase === 'payingRent' || gameState.gamePhase === 'ended') {
+      socket.emit('error', 'You cannot build right now');
+      return;
+    }
+
+    const numericPropertyId = Number(propertyId);
+    const validation = canBuildOnProperty(gameState, currentPlayer, numericPropertyId);
+    if (!validation.ok) {
+      socket.emit('error', validation.reason);
+      return;
+    }
+
+    const property = gameState.board[numericPropertyId];
+    currentPlayer.money -= validation.cost;
+    const buildingType = buildOnProperty(property);
+
+    io.emit('buildingBought', {
+      playerId: currentPlayer.id,
+      playerName: currentPlayer.name,
+      propertyId: property.id,
+      propertyName: property.name,
+      cost: validation.cost,
+      buildingType,
+      houses: property.houses || 0,
+      hotel: !!property.hotel,
+    });
+
+    broadcastGameState();
+  });
+
+  // Handle trade proposals
+  socket.on('proposeTrade', (trade) => {
+    const proposer = gameState.players.find(p => p.socketId === socket.id);
+    if (!proposer) {
+      socket.emit('tradeError', 'You must be in the game to propose trades');
+      return;
+    }
+
+    const target = gameState.players.find(p => p.id === trade.toPlayerId);
+    if (!target) {
+      socket.emit('tradeError', 'Target player not found');
+      return;
+    }
+
+    const tradeId = `t_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const pending = {
+      id: tradeId,
+      fromId: proposer.id,
+      toId: target.id,
+      offer: {
+        money: Number(trade.offer?.money) || 0,
+        properties: Array.isArray(trade.offer?.properties) ? trade.offer.properties.map(Number) : []
+      },
+      request: {
+        money: Number(trade.request?.money) || 0,
+        properties: Array.isArray(trade.request?.properties) ? trade.request.properties.map(Number) : []
+      },
+      timestamp: Date.now()
+    };
+
+    gameState.pendingTrades = gameState.pendingTrades || [];
+    gameState.pendingTrades.push(pending);
+
+    if (target.socketId) {
+      io.to(target.socketId).emit('tradeProposed', {
+        trade: pending,
+        from: { id: proposer.id, name: proposer.name }
+      });
+    }
+
+    socket.emit('tradeProposalSent', { tradeId });
+    broadcastGameState();
+  });
+
+  // Handle responses to trades (accept or decline)
+  socket.on('respondTrade', ({ tradeId, accept, respondAsId }) => {
+    const responder = respondAsId
+      ? gameState.players.find(p => p.id === respondAsId)
+      : gameState.players.find(p => p.socketId === socket.id);
+
+    if (!responder) {
+      socket.emit('tradeError', 'Player not found');
+      return;
+    }
+
+    gameState.pendingTrades = gameState.pendingTrades || [];
+    const idx = gameState.pendingTrades.findIndex(t => t.id === tradeId);
+    if (idx === -1) {
+      socket.emit('tradeError', 'Trade not found or already handled');
+      return;
+    }
+
+    const pending = gameState.pendingTrades[idx];
+    const proposer = gameState.players.find(p => p.id === pending.fromId);
+    const target = gameState.players.find(p => p.id === pending.toId);
+
+    if (!proposer || !target) {
+      socket.emit('tradeError', 'Trade participants not found');
+      return;
+    }
+
+    if (responder.id !== pending.toId) {
+      socket.emit('tradeError', 'Only the target player can respond to this trade');
+      return;
+    }
+
+    gameState.pendingTrades.splice(idx, 1);
+
+    if (!accept) {
+      if (proposer.socketId) io.to(proposer.socketId).emit('tradeDeclined', { tradeId, by: responder.id });
+      if (target.socketId) io.to(target.socketId).emit('tradeDeclined', { tradeId, by: responder.id });
+      broadcastGameState();
+      return;
+    }
+
+    const offerProps = pending.offer.properties || [];
+    const requestProps = pending.request.properties || [];
+
+    const proposerStillOwns = offerProps.every(pid => proposer.properties.includes(pid));
+    const targetStillOwns = requestProps.every(pid => target.properties.includes(pid));
+
+    if (!proposerStillOwns || !targetStillOwns) {
+      const msg = 'One or more properties are no longer owned by the proposing players';
+      if (proposer.socketId) io.to(proposer.socketId).emit('tradeError', msg);
+      if (target.socketId) io.to(target.socketId).emit('tradeError', msg);
+      broadcastGameState();
+      return;
+    }
+
+    if (proposer.money < pending.offer.money || target.money < pending.request.money) {
+      const msg = 'One or both players lack sufficient funds for the proposed cash exchange';
+      if (proposer.socketId) io.to(proposer.socketId).emit('tradeError', msg);
+      if (target.socketId) io.to(target.socketId).emit('tradeError', msg);
+      broadcastGameState();
+      return;
+    }
+
+    offerProps.forEach((pid) => {
+      proposer.properties = proposer.properties.filter(id => id !== pid);
+      target.properties.push(pid);
+      const space = gameState.board[Number(pid)];
+      if (space) space.owner = target.id;
+    });
+
+    requestProps.forEach((pid) => {
+      target.properties = target.properties.filter(id => id !== pid);
+      proposer.properties.push(pid);
+      const space = gameState.board[Number(pid)];
+      if (space) space.owner = proposer.id;
+    });
+
+    const offerMoney = Number(pending.offer.money) || 0;
+    const requestMoney = Number(pending.request.money) || 0;
+
+    proposer.money -= offerMoney;
+    target.money += offerMoney;
+
+    target.money -= requestMoney;
+    proposer.money += requestMoney;
+
+    if (proposer.socketId) io.to(proposer.socketId).emit('tradeExecuted', { tradeId, with: target.id, details: pending });
+    if (target.socketId) io.to(target.socketId).emit('tradeExecuted', { tradeId, with: proposer.id, details: pending });
+
+    io.emit('tradeNotification', { message: `${proposer.name} and ${target.name} completed a trade.` });
+    broadcastGameState();
+  });
+
   // Handle removing a player from the lobby before the game starts
   socket.on('removePlayer', (playerId) => {
     if (gameState.gameStarted) return;
@@ -942,9 +1407,10 @@ io.on('connection', (socket) => {
       gameState.gameStarted = false;
       gameState.currentPlayerIndex = 0;
       gameState.gamePhase = 'waiting';
-      // Reset board ownership
-      gameState.board = BOARD_SPACES.map(space => ({ ...space }));
-      gameState.transactions = [];
+      delete gameState.pendingRent;
+      gameState.pendingTrades = [];
+      gameState.board = createInitialBoard();
+
     } else {
       // Adjust current player index if needed
       if (gameState.currentPlayerIndex >= gameState.players.length) {

@@ -363,6 +363,59 @@ body {
     min-height: 50px;
 }
 
+#buildingControls {
+    margin-top: 12px;
+    padding: 10px;
+    background: #f5f5f5;
+    border-radius: 8px;
+}
+
+.building-controls-title {
+    font-weight: bold;
+    margin-bottom: 8px;
+}
+
+.building-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.building-row .action-btn {
+    width: auto;
+    margin: 0;
+    padding: 8px 10px;
+    font-size: 12px;
+}
+
+.building-markers {
+    margin-top: 4px;
+    display: flex;
+    gap: 2px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.house-marker,
+.hotel-marker {
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  border: none;
+}
+
+
+.hotel-marker {
+    background: #ffe8e8;
+    color: #9b1b1b;
+    border-color: #f0a7a7;
+}
+
 /* Game Board */
 .board-container {
     flex: 1;
@@ -494,6 +547,21 @@ body {
 @keyframes pulse {
     0%, 100% { transform: scale(1); }
     50% { transform: scale(1.1); }
+}
+
+@keyframes flash {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(255, 0, 0, 0.7);
+        background: #667eea;
+    }
+    50% {
+        box-shadow: 0 0 20px 10px rgba(255, 0, 0, 0.3);
+        background: #ff6b6b;
+    }
+}
+
+.action-btn.flashing {
+    animation: flash 0.8s infinite;
 }
 
 /* Corner spaces - special styling */
@@ -701,41 +769,197 @@ body {
     margin: 16px 0;
 }
 
-/* Save Game Bar (bottom of game screen) */
-.save-game-bar {
-    margin-top: 12px;
-    max-width: 800px;
+/* Modal Styles */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 9999;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-content {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    max-width: 600px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.modal-header h3 {
+    margin: 0;
+    font-size: 24px;
+    color: #333;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 28px;
+    color: #999;
+    cursor: pointer;
+    padding: 0;
+    width: 32px;
+    height: 32px;
     display: flex;
     align-items: center;
-    gap: 12px;
+    justify-content: center;
+    transition: color 0.2s;
 }
 
-.save-game-btn {
-    width: auto;
-    padding: 10px 24px;
+.modal-close:hover {
+    color: #333;
 }
 
-.save-game-message {
-    font-size: 14px;
+.modal-body {
+    padding: 20px;
+}
+
+.modal-footer {
+    display: flex;
+    gap: 10px;
+    padding: 16px 20px;
+    border-top: 1px solid #e0e0e0;
+    justify-content: flex-end;
+}
+
+.form-group {
+    margin-bottom: 16px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
     font-weight: bold;
+    color: #333;
+    font-size: 14px;
 }
 
-/* Responsive */
-@media (max-width: 1200px) {
-    .game-container {
-        flex-direction: column;
-    }
-    
-    .sidebar {
-        width: 100%;
-        max-width: 800px;
-    }
-    
-    .game-board {
-        width: 100%;
-        max-width: 800px;
-        height: auto;
-        aspect-ratio: 1;
-    }
+.form-group input,
+.form-group select {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
 }
 
+.form-group input:focus,
+.form-group select:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.trade-columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin: 16px 0;
+}
+
+.trade-column h4 {
+    margin-bottom: 12px;
+    color: #333;
+    font-size: 16px;
+}
+
+.property-list {
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 12px;
+    max-height: 200px;
+    overflow-y: auto;
+    background: #fafafa;
+}
+
+.property-checkbox {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    cursor: pointer;
+    user-select: none;
+}
+
+.property-checkbox input[type="checkbox"] {
+    width: auto;
+    margin-right: 8px;
+    cursor: pointer;
+    accent-color: #667eea;
+}
+
+.property-checkbox span {
+    font-size: 14px;
+    color: #333;
+}
+
+.tutorial-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 9998;
+}
+
+.tutorial-card {
+    position: fixed;
+    width: min(360px, calc(100vw - 32px));
+    background: #fff;
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+    z-index: 10000;
+}
+
+.tutorial-step {
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 6px;
+}
+
+.tutorial-card h3 {
+    margin-bottom: 8px;
+    color: #333;
+}
+
+.tutorial-card p {
+    font-size: 14px;
+    line-height: 1.45;
+    margin-bottom: 14px;
+}
+
+.tutorial-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+}
+
+.tutorial-focus {
+    position: relative;
+    z-index: 1 !important;
+    border-radius: 8px;
+    outline: 3px solid rgba(255, 215, 0, 0.95);
+    outline-offset: 2px;
+    animation: tutorialGlow 1.2s infinite;
+}
+
+@keyframes tutorialGlow {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.8); }
+    50% { box-shadow: 0 0 0 8px rgba(255, 215, 0, 0.28); }
+}
