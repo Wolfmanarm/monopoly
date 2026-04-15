@@ -165,17 +165,93 @@ body {
     gap: 20px;
 }
 
+.right-sidebar {
+    width: 300px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
 .players-panel,
-.controls-panel {
+.controls-panel,
+.account-panel,
+.strategy-panel {
     background: white;
     border-radius: 12px;
     padding: 20px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
-.players-panel h3 {
+.players-panel h3,
+.account-panel h3,
+.strategy-panel h3 {
     margin-bottom: 15px;
     color: #333;
+}
+
+.save-status {
+    margin: 10px 0 0;
+    min-height: 20px;
+    text-align: left;
+}
+
+.account-status {
+    font-size: 13px;
+    color: #666;
+    margin-bottom: 10px;
+}
+
+.account-quick-auth {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.account-quick-auth input {
+    width: 100%;
+    padding: 9px 10px;
+    border: 1px solid #d6d6d6;
+    border-radius: 8px;
+    font-size: 13px;
+}
+
+.account-quick-auth input:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
+.account-quick-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.account-action {
+    flex: 1;
+    padding: 8px 10px;
+}
+
+.account-auth-message {
+    min-height: 16px;
+    font-size: 12px;
+    color: #666;
+}
+
+.strategy-target {
+    font-size: 13px;
+    color: #666;
+    margin-bottom: 10px;
+}
+
+.strategy-list {
+    margin: 0;
+    padding-left: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    color: #333;
+    font-size: 14px;
+    line-height: 1.35;
 }
 
 .player-item {
@@ -436,6 +512,13 @@ body {
     position: relative;
 }
 
+.token-layer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 40;
+}
+
 /* Rotate spaces based on position */
 .board-space.space-0 {
     transform: rotate(0deg);
@@ -536,6 +619,8 @@ body {
     position: absolute;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
     z-index: 10;
+    transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: transform;
 }
 
 .player-token.current-player {
@@ -544,9 +629,21 @@ body {
     animation: pulse 1.5s infinite;
 }
 
+.player-token.moving {
+    animation: tokenLand 0.45s ease-out;
+}
+
 @keyframes pulse {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.1); }
+    0%, 100% { box-shadow: 0 0 8px rgba(255, 215, 0, 0.6); }
+    50% { box-shadow: 0 0 14px rgba(255, 215, 0, 0.95); }
+}
+
+@keyframes tokenLand {
+    0% { filter: brightness(1); }
+    35% { filter: brightness(1.2); }
+    70% { filter: brightness(1); }
+    85% { filter: brightness(1.12); }
+    100% { filter: brightness(1); }
 }
 
 @keyframes flash {

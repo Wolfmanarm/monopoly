@@ -9,7 +9,7 @@ import {
   getColorGroups
 } from '../gameRules.js';
 
-test('createInitialBoard builds a full Monopoly board', () => {
+test('11) createInitialBoard builds a full Monopoly board', () => {
   const board = createInitialBoard();
 
   assert.equal(board.length, 40);
@@ -21,14 +21,14 @@ test('createInitialBoard builds a full Monopoly board', () => {
   assert.equal(board[39].houseCost, HOUSE_COST_BY_COLOR.darkblue);
 });
 
-test('getColorGroups returns each color set', () => {
+test('12) getColorGroups returns each color set', () => {
   const groups = getColorGroups();
 
   assert.deepEqual(groups.brown, [1, 3]);
   assert.deepEqual(groups.darkblue, [37, 39]);
 });
 
-test('calculateRentForSpace doubles rent for a complete color set', () => {
+test('13) calculateRentForSpace doubles rent for a complete color set', () => {
   const board = createInitialBoard();
   const owner = { id: 'player-1' };
 
@@ -38,7 +38,7 @@ test('calculateRentForSpace doubles rent for a complete color set', () => {
   assert.equal(calculateRentForSpace(board, board[1], owner), 4);
 });
 
-test('calculateRentForSpace uses railroad scaling', () => {
+test('14) calculateRentForSpace uses railroad scaling', () => {
   const board = createInitialBoard();
   const owner = { id: 'player-1' };
 
@@ -49,7 +49,7 @@ test('calculateRentForSpace uses railroad scaling', () => {
   assert.equal(calculateRentForSpace(board, board[5], owner), 100);
 });
 
-test('calculateRentForSpace uses the correct house tier', () => {
+test('15) calculateRentForSpace uses the correct house tier', () => {
   const board = createInitialBoard();
   const owner = { id: 'player-1' };
 

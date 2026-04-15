@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
@@ -53,6 +54,7 @@ gameState.board = createInitialBoard();
 
 // Player colors
 const PLAYER_COLORS = ['#fa0000', '#0bf2e3', '#efca13', '#35e71a', '#2d00a8', '#fc870b'];
+const isTestMode = process.env.NODE_ENV === 'test' || process.env.TEST_MODE === '1';
 
 const CHANCE_CARDS = [
   { text: 'Advance to GO (Collect $200)', type: 'move', position: 0, collectGo: true },
@@ -842,10 +844,6 @@ io.on('connection', (socket) => {
       return;
     }
 
-// Process payment
-payer.money -= pending.rent;
-owner.money += pending.rent;
-
     // Process payment
     payer.money -= pending.rent;
     owner.money += pending.rent;
@@ -1225,6 +1223,96 @@ owner.money += pending.rent;
     gameState.players = gameState.players.filter(p => p.id !== playerId);
     broadcastGameState();
   });
+
+  if (isTestMode) {
+    socket.on('testSetState', (patch = {}) => {
+      if (typeof patch.currentPlayerIndex === 'number') {
+        gameState.currentPlayerIndex = patch.currentPlayerIndex;
+      }
+      if (typeof patch.gamePhase === 'string') {
+        gameState.gamePhase = patch.gamePhase;
+      }
+      if (typeof patch.gameStarted === 'boolean') {
+        gameState.gameStarted = patch.gameStarted;
+      }
+      if (typeof patch.freePlay === 'boolean') {
+        gameState.freePlay = patch.freePlay;
+      }
+      if (patch.pendingRent === null) {
+        delete gameState.pendingRent;
+      } else if (patch.pendingRent) {
+        gameState.pendingRent = patch.pendingRent;
+      }
+      if (Array.isArray(patch.players)) {
+        patch.players.forEach((playerPatch) => {
+          const player = gameState.players.find((p) => p.id === playerPatch.id);
+          if (!player) return;
+          Object.assign(player, playerPatch);
+        });
+      }
+      if (Array.isArray(patch.board)) {
+        patch.board.forEach((spacePatch) => {
+          const space = gameState.board[Number(spacePatch.id)];
+          if (!space) return;
+          Object.assign(space, spacePatch);
+        });
+      }
+      broadcastGameState();
+    });
+
+    socket.on('testSendToJail', (playerId) => {
+      const player = gameState.players.find((p) => p.id === playerId);
+      if (!player) return;
+      player.position = 10;
+      player.inJail = true;
+      player.jailTurns = 0;
+      player.hasPaidJailFine = false;
+      player.consecutiveDoubles = 0;
+      gameState.gamePhase = 'rolling';
+      broadcastGameState();
+    });
+
+    socket.on('testSetCurrentPlayer', (playerId) => {
+      const idx = gameState.players.findIndex((p) => p.id === playerId);
+      if (idx >= 0) {
+        gameState.currentPlayerIndex = idx;
+        broadcastGameState();
+      }
+    });
+
+    socket.on('testRollDice', ({ die1 = 1, die2 = 1 } = {}) => {
+      const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+      if (!currentPlayer) return;
+
+      const total = Number(die1) + Number(die2);
+      const oldPosition = currentPlayer.position;
+      const newPosition = (oldPosition + total) % 40;
+      const passedGo = (oldPosition + total) >= 40;
+
+      currentPlayer.position = newPosition;
+      if (passedGo && newPosition !== 0) {
+        currentPlayer.money += 200;
+      }
+
+      io.emit('diceRolled', {
+        playerId: currentPlayer.id,
+        playerName: currentPlayer.name,
+        spaceName: gameState.board[newPosition]?.name,
+        finalSpaceName: gameState.board[newPosition]?.name,
+        dice: [Number(die1), Number(die2)],
+        total,
+        isDoubles: Number(die1) === Number(die2),
+        result: {
+          action: 'testMove',
+          oldPosition,
+          newPosition,
+        },
+        postCardResult: null
+      });
+
+      broadcastGameState();
+    });
+  }
 
   // Handle player disconnect
   socket.on('disconnect', () => {

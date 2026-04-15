@@ -1,17 +1,24 @@
+import 'dotenv/config';
 import pg from 'pg';
 
 const { Pool } = pg;
 
-export const dbEnabled = Boolean(process.env.DATABASE_URL);
+const connectionString = process.env.DATABASE_URL;
+export const dbEnabled = Boolean(connectionString);
 
 if (!dbEnabled) {
   console.warn('DATABASE_URL is not set. Running in local mode without database-backed auth/saves.');
 }
 
+const isLocalConnection = typeof connectionString === 'string'
+  && /(localhost|127\.0\.0\.1)/i.test(connectionString);
+const dbSslSetting = process.env.DB_SSL;
+const useSsl = dbSslSetting === 'true' || (dbSslSetting !== 'false' && !isLocalConnection);
+
 const pool = dbEnabled
   ? new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false }
+      connectionString,
+      ...(useSsl ? { ssl: { rejectUnauthorized: false } } : {})
     })
   : {
       query: async () => {
