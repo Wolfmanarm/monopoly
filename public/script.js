@@ -471,7 +471,28 @@ document.addEventListener('click', (e) => {
         return;
     }
 
-    
+    const clickedTutorialNav = target.closest('#tutorialPrevBtn, #tutorialNextBtn, #tutorialCloseBtn');
+    if (clickedTutorialNav) {
+        if (clickedTutorialNav.id === 'tutorialCloseBtn') {
+            closeTutorial();
+            return;
+        }
+        if (clickedTutorialNav.id === 'tutorialPrevBtn') {
+            if (tutorialIndex > 0) {
+                tutorialIndex -= 1;
+                renderTutorialStep();
+            }
+            return;
+        }
+        if (clickedTutorialNav.id === 'tutorialNextBtn') {
+            if (tutorialIndex >= tutorialSteps.length - 1) {
+                closeTutorial();
+            } else {
+                tutorialIndex += 1;
+                renderTutorialStep();
+            }
+        }
+    }
 });
 
 // How to Play toggle
