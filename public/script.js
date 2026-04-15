@@ -50,6 +50,15 @@ const tutorialCloseBtn = document.getElementById('tutorialCloseBtn');
 const saveGameBtn = document.getElementById('saveGameBtn');
 const gameLogoutBtn = document.getElementById('gameLogoutBtn');
 const saveGameMessage = document.getElementById('saveGameMessage');
+const accountStatus = document.getElementById('accountStatus');
+const accountQuickAuth = document.getElementById('accountQuickAuth');
+const accountUsername = document.getElementById('accountUsername');
+const accountPassword = document.getElementById('accountPassword');
+const accountLoginBtn = document.getElementById('accountLoginBtn');
+const accountRegisterBtn = document.getElementById('accountRegisterBtn');
+const accountAuthMessage = document.getElementById('accountAuthMessage');
+const strategyAdvisorTarget = document.getElementById('strategyAdvisorTarget');
+const strategyAdvisorList = document.getElementById('strategyAdvisorList');
 
 // Trade Modal elements
 const tradeModal = document.getElementById('tradeModal');
@@ -74,6 +83,9 @@ let tutorialSteps = [];
 let tutorialIndex = 0;
 let tutorialActive = false;
 let tradeHandlersBound = false;
+const tokenElementsByPlayerId = new Map();
+const previousPlayerPositions = new Map();
+const tokenAnimationChains = new Map();
 
 const TRADE_REQUIRED_IDS = [
     'tradeModal',
@@ -95,6 +107,62 @@ const TRADE_REQUIRED_IDS = [
 function ensureTradeAndTutorialContainers() {
     const gameEl = document.getElementById('game');
     const hasAllTradeNodes = TRADE_REQUIRED_IDS.every((id) => !!document.getElementById(id));
+    if (gameEl && !hasAllTradeNodes) {
+        const oldTradeModal = document.getElementById('tradeModal');
+        const oldTradeResponseModal = document.getElementById('tradeResponseModal');
+        if (oldTradeModal) oldTradeModal.remove();
+        if (oldTradeResponseModal) oldTradeResponseModal.remove();
+        /*
+        gameEl.insertAdjacentHTML('beforeend', `
+        <div id="tradeModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Propose a Trade</h3>
+                    <button id="tradeModalClose" class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label>Trade With:</label>
+                        <select id="tradeTarget"><option value="">Select a player</option></select>
+                    </div>
+                    <div class="trade-columns">
+                        <div class="trade-column">
+                            <h4>You Offer</h4>
+                            <div class="form-group"><label>Money:</label><input type="number" id="offerMoney" min="0" value="0" placeholder="0"></div>
+                            <div class="form-group"><label>Properties (select):</label><div id="offerProperties" class="property-list"></div></div>
+                        </div>
+                        <div class="trade-column">
+                            <h4>You Request</h4>
+                            <div class="form-group"><label>Money:</label><input type="number" id="requestMoney" min="0" value="0" placeholder="0"></div>
+                            <div class="form-group"><label>Properties (select):</label><div id="requestProperties" class="property-list"></div></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="tradeSubmitBtn" class="action-btn">Send Proposal</button>
+                    <button id="tradeCancelBtn" class="action-btn secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
+        <div id="tradeResponseModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header"><h3>Trade Proposal</h3></div>
+                <div class="modal-body">
+                    <div id="tradeProposalContent" style="font-size: 16px; line-height: 1.6;"></div>
+                    <div class="form-group" style="margin-top: 20px;">
+                        <label>Respond as (local testing only):</label>
+                        <select id="respondAsPlayer"><option value="">Select player</option></select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="tradeAcceptBtn" class="action-btn">Accept</button>
+                    <button id="tradeRejectBtn" class="action-btn secondary">Decline</button>
+                </div>
+            </div>
+        </div>`);*/
+
+        tradeHandlersBound = false;
+    }
    
 }
 
@@ -484,14 +552,61 @@ function showAuthMessage(msg, isError) {
     authMessage.style.color = isError ? '#c0392b' : '#27ae60';
 }
 
+function refreshAccountPanel() {
+    const loggedIn = !!currentUser;
+    if (saveGameBtn) saveGameBtn.style.display = loggedIn ? 'block' : 'none';
+    if (gameLogoutBtn) gameLogoutBtn.style.display = loggedIn ? 'block' : 'none';
+    if (accountQuickAuth) accountQuickAuth.style.display = loggedIn ? 'none' : 'flex';
+    if (accountStatus) {
+        accountStatus.textContent = loggedIn
+            ? `Logged in as ${currentUser.username}`
+            : 'Not logged in. Use the lobby to log in.';
+    }
+    if (loggedIn && accountAuthMessage) accountAuthMessage.textContent = '';
+}
+
+function showAccountAuthMessage(msg, isError = false) {
+    if (!accountAuthMessage) return;
+    accountAuthMessage.textContent = msg;
+    accountAuthMessage.style.color = isError ? '#c0392b' : '#27ae60';
+}
+
+async function submitAccountAuth(mode) {
+    const username = accountUsername?.value?.trim();
+    const password = accountPassword?.value || '';
+    if (!username || !password) {
+        showAccountAuthMessage('Enter username and password', true);
+        return;
+    }
+
+    const endpoint = mode === 'register' ? '/api/register' : '/api/login';
+    try {
+        const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            showAccountAuthMessage(data.error || 'Authentication failed', true);
+            return;
+        }
+
+        setLoggedIn(data);
+        if (accountUsername) accountUsername.value = '';
+        if (accountPassword) accountPassword.value = '';
+    } catch {
+        showAccountAuthMessage('Authentication failed', true);
+    }
+}
+
 function setLoggedIn(user) {
     hasLoggedOut = false;
     currentUser = user;
     if (authForms) authForms.style.display = 'none';
     if (loggedInSection) loggedInSection.style.display = 'block';
     if (loggedInName) loggedInName.textContent = user.username;
-    if (saveGameBtn) saveGameBtn.style.display = 'block';
-    if (gameLogoutBtn) gameLogoutBtn.style.display = 'block';
+    refreshAccountPanel();
     loadSavedGames();
 }
 
@@ -500,8 +615,7 @@ function setLoggedOut() {
     currentUser = null;
     if (authForms) authForms.style.display = 'block';
     if (loggedInSection) loggedInSection.style.display = 'none';
-    if (saveGameBtn) saveGameBtn.style.display = 'none';
-    if (gameLogoutBtn) gameLogoutBtn.style.display = 'none';
+    refreshAccountPanel();
     if (savedGamesList) savedGamesList.innerHTML = '';
     lobbyScreen.style.display = 'block';
     gameScreen.style.display = 'none';
@@ -579,6 +693,20 @@ if (registerBtn && regUsername && regPassword) {
             regUsername.value = '';
             regPassword.value = '';
         } catch { showAuthMessage('Registration failed', true); }
+    });
+}
+
+if (accountLoginBtn) {
+    accountLoginBtn.addEventListener('click', () => submitAccountAuth('login'));
+}
+
+if (accountRegisterBtn) {
+    accountRegisterBtn.addEventListener('click', () => submitAccountAuth('register'));
+}
+
+if (accountPassword) {
+    accountPassword.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') submitAccountAuth('login');
     });
 }
 
@@ -956,9 +1084,8 @@ function updateUI() {
     gameScreen.style.display = 'block';
     ensureFeatureButtonsVisible();
 
-    // Show save/logout buttons only if logged in
-    if (saveGameBtn) saveGameBtn.style.display = currentUser ? 'block' : 'none';
-    if (gameLogoutBtn) gameLogoutBtn.style.display = currentUser ? 'block' : 'none';
+    // Keep account panel in sync with login state
+    refreshAccountPanel();
 
     // Update board
     renderBoard();
@@ -968,6 +1095,11 @@ function updateUI() {
 
     // Update controls
     updateControls();
+
+    // Update strategy suggestions for the active turn player.
+    // This keeps local-host sessions in sync when testing multiple players on one host.
+    const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+    updateStrategyAdvisor(currentPlayer, currentPlayer);
 
     // Update game status
     if (gameState.gamePhase === 'ended' && gameState.players.length === 1) {
@@ -979,7 +1111,6 @@ function updateUI() {
         return;
     }
 
-    const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     if (currentPlayer) {
         gameStatus.textContent = `${currentPlayer.name}'s Turn`;
         gameStatus.style.color = currentPlayer.color;
@@ -1034,7 +1165,7 @@ function updateLobby() {
 }
 
 function renderBoard() {
-    gameBoard.innerHTML = '';
+    gameBoard.querySelectorAll('.board-space').forEach((spaceEl) => spaceEl.remove());
     
     // Create all 40 spaces in Monopoly board layout
     // Bottom row: 0-10 (left to right)
@@ -1057,24 +1188,142 @@ function renderBoard() {
         createSpace(i, i - 30, 10);
     }
     
-    // Place player tokens
-    gameState.players.forEach((player, playerIndex) => {
-        const spaceDiv = gameBoard.querySelector(`.space-${player.position}`);
-        if (spaceDiv) {
-            const tokensContainer = spaceDiv.querySelector('.space-tokens');
-            if (tokensContainer) {
-                const token = document.createElement('div');
-                token.className = 'player-token';
-                token.style.backgroundColor = player.color;
-                if (player.id === gameState.players[gameState.currentPlayerIndex].id) {
-                    token.classList.add('current-player');
-                }
-                token.style.left = `${(playerIndex % 4) * 18}px`;
-                token.style.top = `${Math.floor(playerIndex / 4) * 18}px`;
-                token.title = player.name;
-                tokensContainer.appendChild(token);
-            }
+    updateAnimatedTokens();
+}
+
+function ensureTokenLayer() {
+    let tokenLayer = gameBoard.querySelector('.token-layer');
+    if (!tokenLayer) {
+        tokenLayer = document.createElement('div');
+        tokenLayer.className = 'token-layer';
+        gameBoard.appendChild(tokenLayer);
+    }
+    return tokenLayer;
+}
+
+function getTokenTargetPosition(spaceId, stackIndex) {
+    const spaceDiv = gameBoard.querySelector(`.space-${spaceId}`);
+    if (!spaceDiv) return null;
+
+    const tokenSize = 16;
+    const spaceCenterX = spaceDiv.offsetLeft + (spaceDiv.clientWidth / 2);
+    const spaceCenterY = spaceDiv.offsetTop + (spaceDiv.clientHeight / 2);
+    const offsetX = ((stackIndex % 3) - 1) * 8;
+    const offsetY = (Math.floor(stackIndex / 3) - 0.5) * 8;
+
+    return {
+        x: Math.round(spaceCenterX - (tokenSize / 2) + offsetX),
+        y: Math.round(spaceCenterY - (tokenSize / 2) + offsetY)
+    };
+}
+
+function wait(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getForwardPath(start, end, boardSize = 40) {
+    if (!Number.isInteger(start) || !Number.isInteger(end)) return [];
+    const steps = ((end - start) % boardSize + boardSize) % boardSize;
+    if (steps === 0) return [];
+
+    const path = [];
+    for (let i = 1; i <= steps; i += 1) {
+        path.push((start + i) % boardSize);
+    }
+    return path;
+}
+
+function queueTokenAnimation(playerId, task) {
+    const existing = tokenAnimationChains.get(playerId) || Promise.resolve();
+    const chained = existing
+        .catch(() => {})
+        .then(task)
+        .catch((err) => console.error('Token animation error:', err));
+    tokenAnimationChains.set(playerId, chained);
+}
+
+async function animatePlayerTokenStepByStep(player, tokenEl, startPosition, endPosition, slotIndex) {
+    const path = getForwardPath(startPosition, endPosition);
+    if (path.length === 0) {
+        const target = getTokenTargetPosition(endPosition, slotIndex);
+        if (target) tokenEl.style.transform = `translate(${target.x}px, ${target.y}px)`;
+        return;
+    }
+
+    for (const spaceId of path) {
+        // If the token was removed/replaced, stop this animation chain.
+        if (tokenElementsByPlayerId.get(player.id) !== tokenEl) return;
+
+        const target = getTokenTargetPosition(spaceId, slotIndex);
+        if (!target) continue;
+        tokenEl.style.transform = `translate(${target.x}px, ${target.y}px)`;
+        await wait(280);
+    }
+
+    tokenEl.classList.remove('moving');
+    void tokenEl.offsetWidth;
+    tokenEl.classList.add('moving');
+    setTimeout(() => {
+        if (tokenElementsByPlayerId.get(player.id) === tokenEl) {
+            tokenEl.classList.remove('moving');
         }
+    }, 480);
+}
+
+function updateAnimatedTokens() {
+    const tokenLayer = ensureTokenLayer();
+
+    const activePlayerIds = new Set(gameState.players.map((player) => player.id));
+
+    // Remove tokens for players no longer in game
+    Array.from(tokenElementsByPlayerId.keys()).forEach((playerId) => {
+        if (!activePlayerIds.has(playerId)) {
+            const tokenEl = tokenElementsByPlayerId.get(playerId);
+            if (tokenEl) tokenEl.remove();
+            tokenElementsByPlayerId.delete(playerId);
+            previousPlayerPositions.delete(playerId);
+        }
+    });
+
+    const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+
+    gameState.players.forEach((player, playerIndex) => {
+        const stackIndex = playerIndex;
+        const target = getTokenTargetPosition(player.position, stackIndex);
+        if (!target) return;
+
+        let tokenEl = tokenElementsByPlayerId.get(player.id);
+        if (!tokenEl) {
+            tokenEl = document.createElement('div');
+            tokenEl.className = 'player-token';
+            tokenEl.style.backgroundColor = player.color;
+            tokenEl.title = player.name;
+            tokenEl.style.transition = 'none';
+            tokenEl.style.transform = `translate(${target.x}px, ${target.y}px)`;
+            tokenLayer.appendChild(tokenEl);
+            tokenElementsByPlayerId.set(player.id, tokenEl);
+
+            requestAnimationFrame(() => {
+                tokenEl.style.transition = '';
+            });
+        }
+
+        tokenEl.classList.toggle('current-player', !!currentPlayer && currentPlayer.id === player.id);
+
+        const previousPosition = previousPlayerPositions.get(player.id);
+        const isFirstPlacement = previousPosition === undefined;
+
+        if (isFirstPlacement) {
+            tokenEl.style.transform = `translate(${target.x}px, ${target.y}px)`;
+        } else if (previousPosition !== player.position) {
+            queueTokenAnimation(player.id, () =>
+                animatePlayerTokenStepByStep(player, tokenEl, previousPosition, player.position, stackIndex)
+            );
+        } else {
+            // Keep token aligned when board dimensions or spacing change.
+            tokenEl.style.transform = `translate(${target.x}px, ${target.y}px)`;
+        }
+        previousPlayerPositions.set(player.id, player.position);
     });
 }
 
@@ -1359,6 +1608,12 @@ playerNameInput.addEventListener('keypress', (e) => {
     }
 });
 
+window.addEventListener('resize', () => {
+    if (gameState && gameScreen.style.display !== 'none') {
+        updateAnimatedTokens();
+    }
+});
+
 //Purpose: Helper function to get player properties
 //Input: player
 //Output: The player's properties as a string
@@ -1375,6 +1630,170 @@ function getPlayerPropertyNames(player) {
     return player.properties
         .map(propertyID => gameState.board[propertyID]?.name)
         .filter(Boolean);
+}
+
+function isOwnableSpace(space) {
+    return !!space && (space.type === 'property' || space.type === 'railroad' || space.type === 'utility');
+}
+
+function forwardDistance(from, to, boardSize = 40) {
+    return ((to - from) % boardSize + boardSize) % boardSize;
+}
+
+function colorSetSize(color) {
+    return gameState.board.filter((space) => space.type === 'property' && space.color === color).length;
+}
+
+function playerOwnsColorCount(player, color) {
+    const ownedSet = new Set((player.properties || []).map((id) => Number(id)));
+    return gameState.board.filter((space) => space.type === 'property' && space.color === color && ownedSet.has(Number(space.id))).length;
+}
+
+function estimateClientRent(space, owner) {
+    if (!space || !owner) return 0;
+
+    if (space.type === 'railroad') {
+        const count = gameState.board.filter((s) => s.type === 'railroad' && s.owner === owner.id).length;
+        if (count <= 0) return 0;
+        return (Number(space.rent) || 25) * Math.pow(2, count - 1);
+    }
+
+    if (space.type === 'utility') {
+        const count = gameState.board.filter((s) => s.type === 'utility' && s.owner === owner.id).length;
+        return count >= 2 ? 70 : 28;
+    }
+
+    if (space.type === 'property') {
+        const rentTiers = Array.isArray(space.rentTiers) ? space.rentTiers : null;
+        const houses = Number(space.houses) || 0;
+        const level = space.hotel ? 5 : Math.max(0, Math.min(4, houses));
+        if (rentTiers && typeof rentTiers[level] === 'number') {
+            if (level > 0) return rentTiers[level];
+            const sameColor = gameState.board.filter((s) => s.type === 'property' && s.color === space.color);
+            const hasSet = sameColor.length > 0 && sameColor.every((s) => s.owner === owner.id);
+            return hasSet ? rentTiers[0] * 2 : rentTiers[0];
+        }
+        const base = Number(space.rent) || 0;
+        return base;
+    }
+
+    return Number(space.rent) || 0;
+}
+
+function rankUnownedProperties(player) {
+    const ownedSet = new Set((player.properties || []).map((id) => Number(id)));
+    const ownedRailroads = gameState.board.filter((s) => s.type === 'railroad' && ownedSet.has(Number(s.id))).length;
+    const ownedUtilities = gameState.board.filter((s) => s.type === 'utility' && ownedSet.has(Number(s.id))).length;
+
+    return gameState.board
+        .filter((space) => isOwnableSpace(space) && !space.owner)
+        .map((space) => {
+            const price = Number(space.price) || 0;
+            const baseRent = Array.isArray(space.rentTiers) ? Number(space.rentTiers[0]) || 0 : Number(space.rent) || 0;
+            const distance = forwardDistance(player.position, space.id);
+            let score = 0;
+
+            if (price > 0) {
+                score += Math.min(120, Math.round((baseRent / price) * 700));
+                score += player.money >= price ? 70 : -220;
+            }
+
+            if (space.type === 'property') {
+                const ownedInColor = playerOwnsColorCount(player, space.color);
+                const setSize = colorSetSize(space.color);
+                if (ownedInColor > 0) score += 95 * ownedInColor;
+                if (ownedInColor === setSize - 1) score += 180;
+            }
+
+            if (space.type === 'railroad') {
+                score += 70 + (ownedRailroads * 60);
+            }
+
+            if (space.type === 'utility') {
+                score += 30 + (ownedUtilities * 30);
+            }
+
+            if (distance > 0 && distance <= 10) {
+                score += (11 - distance) * 7;
+            }
+
+            return { space, score, distance };
+        })
+        .sort((a, b) => b.score - a.score);
+}
+
+function getNearbyThreat(player) {
+    let highest = null;
+
+    for (let step = 1; step <= 8; step += 1) {
+        const space = gameState.board[(player.position + step) % 40];
+        if (!isOwnableSpace(space) || !space.owner || space.owner === player.id) continue;
+        const owner = gameState.players.find((p) => p.id === space.owner);
+        if (!owner) continue;
+        const rent = estimateClientRent(space, owner);
+        if (!highest || rent > highest.rent) {
+            highest = { step, space, owner, rent };
+        }
+    }
+
+    return highest;
+}
+
+function updateStrategyAdvisor(advisoryPlayer, currentTurnPlayer) {
+    if (!strategyAdvisorList || !strategyAdvisorTarget || !gameState || !advisoryPlayer) return;
+
+    const tips = [];
+    const me = advisoryPlayer;
+    const isMyTurn = !!currentTurnPlayer && currentTurnPlayer.id === me.id;
+    const wealth = Number(me.money) || 0;
+    const here = gameState.board[me.position];
+
+    strategyAdvisorTarget.textContent = `Advising ${me.name} • Cash $${wealth}`;
+
+    if (gameState.gamePhase === 'buying' && isMyTurn && isOwnableSpace(here) && !here.owner) {
+        const price = Number(here.price) || 0;
+        const canAfford = wealth >= price;
+        if (!canAfford) {
+            tips.push(`Skip ${here.name}: it costs $${price}, and your cash is too low right now.`);
+        } else if (here.type === 'property') {
+            const ownedInColor = playerOwnsColorCount(me, here.color);
+            const setSize = colorSetSize(here.color);
+            if (ownedInColor === setSize - 1) {
+                tips.push(`Buy ${here.name}: this completes your ${here.color} color set.`);
+            } else if (ownedInColor > 0) {
+                tips.push(`Buying ${here.name} strengthens your ${here.color} set for future builds.`);
+            } else {
+                tips.push(`Consider buying ${here.name} if you keep at least $250 in reserve.`);
+            }
+        } else if (here.type === 'railroad') {
+            tips.push(`Railroads scale fast. Buying ${here.name} improves future rent pressure.`);
+        } else if (here.type === 'utility') {
+            tips.push(`Utilities are situational; buy ${here.name} mainly if you have a strong cash cushion.`);
+        }
+    }
+
+    if (wealth < 200) {
+        tips.push('Low cash warning: prioritize survival and avoid optional buys unless they complete a set.');
+    } else if (wealth > 1200 && (me.properties?.length || 0) < 2) {
+        tips.push('You have strong cash but low board control. Prioritize acquiring one or two high-value properties.');
+    }
+
+    const threat = getNearbyThreat(me);
+    if (threat && threat.rent > 0) {
+        tips.push(`Risk ahead: ${threat.space.name} in ${threat.step} spaces could cost about $${threat.rent} to ${threat.owner.name}.`);
+    }
+
+    const targets = rankUnownedProperties(me).slice(0, 2);
+    targets.forEach((target, index) => {
+        const distanceText = target.distance === 0 ? 'on your space' : `${target.distance} spaces ahead`;
+        tips.push(`Target ${index + 1}: ${target.space.name} (${distanceText}) is a strong pickup opportunity.`);
+    });
+
+    if (tips.length === 0) {
+        tips.push('Build cash and watch opponent monopolies; your next turn may open stronger buy options.');
+    }
+
+    strategyAdvisorList.innerHTML = tips.slice(0, 5).map((tip) => `<li>${tip}</li>`).join('');
 }
 
 function clearTutorialFocus() {
@@ -1505,32 +1924,6 @@ function startTutorial() {
     tutorialActive = true;
     overlay.style.display = 'block';
     renderTutorialStep();
-}
-
-if (lobbyTutorialBtn) lobbyTutorialBtn.addEventListener('click', startTutorial);
-if (gameTutorialBtn) gameTutorialBtn.addEventListener('click', startTutorial);
-
-if (tutorialPrevBtn) {
-    tutorialPrevBtn.addEventListener('click', () => {
-        if (tutorialIndex <= 0) return;
-        tutorialIndex -= 1;
-        renderTutorialStep();
-    });
-}
-
-if (tutorialNextBtn) {
-    tutorialNextBtn.addEventListener('click', () => {
-        if (tutorialIndex >= tutorialSteps.length - 1) {
-            closeTutorial();
-            return;
-        }
-        tutorialIndex += 1;
-        renderTutorialStep();
-    });
-}
-
-if (tutorialCloseBtn) {
-    tutorialCloseBtn.addEventListener('click', closeTutorial);
 }
 
 if (tutorialOverlay) {

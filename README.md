@@ -35,6 +35,35 @@ npm start
 http://localhost:3000
 ```
 
+## Database Setup (for auth + save/load)
+
+The app enables saving features when `DATABASE_URL` is configured.
+
+1. Create your env file:
+```bash
+cp .env.example .env
+```
+
+Update `DATABASE_URL` in `.env` with your local Postgres password:
+```env
+DATABASE_URL=postgres://postgres:YOUR_POSTGRES_PASSWORD@localhost:5432/monopoly_dev
+DB_SSL=false
+```
+
+2. Create the local Postgres database:
+```bash
+npm run db:create
+```
+
+3. Start the app (tables are auto-created on startup):
+```bash
+npm start
+```
+
+If you use a local Postgres server, keep `DB_SSL=false`.
+
+If `npm run db:create` reports a missing password, your `DATABASE_URL` is missing credentials.
+
 ## How to Play
 
 1. **Join Game**: Enter your name and click "Join Game"

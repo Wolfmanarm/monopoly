@@ -102,6 +102,33 @@
             <div class="board-container">
                 <div id="gameBoard" class="game-board"></div>
             </div>
+
+            <!-- Right Sidebar -->
+            <div class="right-sidebar">
+                <div class="account-panel">
+                    <h3>Account</h3>
+                    <div id="accountStatus" class="account-status">Not logged in. Use the lobby to log in.</div>
+                    <div id="accountQuickAuth" class="account-quick-auth">
+                        <input type="text" id="accountUsername" placeholder="Username" maxlength="20">
+                        <input type="password" id="accountPassword" placeholder="Password">
+                        <div class="account-quick-actions">
+                            <button id="accountLoginBtn" class="auth-btn-small account-action">Log In</button>
+                            <button id="accountRegisterBtn" class="auth-btn-small account-action">Register</button>
+                        </div>
+                        <div id="accountAuthMessage" class="account-auth-message"></div>
+                    </div>
+                    <button id="saveGameBtn" class="action-btn" style="display: none;">Save Game</button>
+                    <button id="gameLogoutBtn" class="action-btn secondary" style="display: none;">Log Out</button>
+                    <div id="saveGameMessage" class="status-message save-status" aria-live="polite"></div>
+                </div>
+                <div class="strategy-panel">
+                    <h3>Strategy Advisor</h3>
+                    <div id="strategyAdvisorTarget" class="strategy-target"></div>
+                    <ul id="strategyAdvisorList" class="strategy-list">
+                        <li>Roll to get recommendations.</li>
+                    </ul>
+                </div>
+            </div>
         </div>
 
         <!-- Trade Modal -->
